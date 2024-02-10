@@ -35,17 +35,18 @@ func main() {
 	search := NewSearch(*url, *port, *protocol)
 
 	switch {
-	case search.Url == "":
-		ShowHelp()
-		return
 	case *versionFlag:
 		version.App()
+		return
+	case search.Url == "":
+		ShowHelp()
 		return
 	}
 
 	var urls []string
 	wg := &sync.WaitGroup{}
-	mu := sync.Mutex{}
+	mu := &sync.Mutex{}
+
 	urls = strings.Split(search.Url, ",")
 
 	for _, url := range urls {

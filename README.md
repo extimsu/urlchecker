@@ -24,12 +24,26 @@ You can also check multiple urls in the same:
 ./bin/urlchecker --url extim.su,google.com:80,example.com:443
 ```
 
+Yu can specify protocol (--protocol). It's can be tcp or udp.
+
+```console
+./bin/urlchecker --url google.com:53 --protocol udp
+```
+
 ### Docker
 
-```bash
+```console
 docker run docker.io/extim/urlchecker --url extim.su
 ```
-OR
-```bash
-docker run docker.io/extim/urlchecker --url extim.su --port 443
+
+```console
+docker run docker.io/extim/urlchecker --url extim.su,google.com:80,example.com:443
+```
+
+```console
+docker run docker.io/extim/urlchecker --url extim.su:80,google.com:80,example.com:443 --port 443
+```
+
+```console
+docker run docker.io/extim/urlchecker --url google.com:53 --protocol udp
 ```
