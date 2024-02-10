@@ -9,7 +9,7 @@ import (
 var GitCommit string
 
 // Version returns the main version number that is being run at the moment.
-const Version = "0.1.0"
+const Version = "0.1.1"
 
 // BuildDate returns the date the binary was built
 var BuildDate = ""
@@ -21,3 +21,12 @@ var GoVersion = runtime.Version()
 var OsArch = fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
 
 var Author = fmt.Sprint("Alexander Baulin, 2024 (c) https://extim.su")
+
+func App() {
+	fmt.Println("Build Date:", BuildDate)
+	fmt.Println("Git Commit:", GitCommit)
+	fmt.Println("Version:", Version)
+	fmt.Println("Go Version:", GoVersion)
+	fmt.Println("OS / Arch:", OsArch)
+	fmt.Println("Author:", Author)
+}

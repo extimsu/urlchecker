@@ -1,9 +1,9 @@
 package main
 
 import (
-	"testing"
 	"fmt"
 	"net"
+	"testing"
 	"time"
 )
 

@@ -18,6 +18,12 @@ run:
 ./bin/urlchecker --url extim.su
 ```
 
+You can also check multiple urls in the same:
+
+```console
+./bin/urlchecker --url extim.su,google.com:80,example.com:443
+```
+
 ### Docker
 
 ```bash
