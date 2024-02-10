@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -15,24 +17,36 @@ type Search struct {
 	Url      string
 	Port     string
 	Protocol string
+	Timeout  time.Duration
 }
 
-func NewSearch(url, port, protocol string) *Search {
+func NewSearch(url, port, protocol, t string) (*Search, error) {
+
+	timeout, err := time.ParseDuration(t)
+	if err != nil {
+		return nil, errors.New("invalid timeout, please check how to use this functional")
+	}
+
 	return &Search{
 		Url:      url,
 		Port:     port,
 		Protocol: protocol,
-	}
+		Timeout:  timeout,
+	}, nil
 }
 
 func main() {
-	url := flag.String("url", "", "a url to checking")
-	port := flag.String("port", "80", "a port for checking")
-	protocol := flag.String("protocol", "tcp", "a type of protocol")
+	url := flag.String("url", "", "a url to checking, ex: example.com")
+	port := flag.String("port", "80", "a port for checking, ex: 443")
+	protocol := flag.String("protocol", "tcp", "a type of protocol (tcp or udp), ex: udp")
+	timeout := flag.String("timeout", "5s", "a timeout for checking in seconds, ex: 3s")
 	versionFlag := flag.Bool("version", false, "Version")
 	flag.Parse()
 
-	search := NewSearch(*url, *port, *protocol)
+	search, err := NewSearch(*url, *port, *protocol, *timeout)
+	if err != nil {
+		log.Fatal("We can proceed, because of error: ", err)
+	}
 
 	switch {
 	case *versionFlag:
@@ -64,6 +78,7 @@ func main() {
 	fmt.Println("---")
 }
 
+// Check - checks url address using port number
 func (search *Search) Check(url string) string {
 	var (
 		port_from_url []string
@@ -77,12 +92,12 @@ func (search *Search) Check(url string) string {
 		address = url + ":" + search.Port
 	}
 
-	timeout := time.Duration(time.Second * 4)
+	timeout := search.Timeout
 	_, err := net.DialTimeout(search.Protocol, address, timeout)
 	if err != nil {
-		return fmt.Sprintf("[-] [%v] %v [DOWN]", search.Protocol, address)
+		return fmt.Sprintf("😿 [-] [%v]  %v", search.Protocol, address)
 	} else {
-		return fmt.Sprintf("[+] [UP] [%v] %v", search.Protocol, address)
+		return fmt.Sprintf("😺 [+] [%v]  %v", search.Protocol, address)
 	}
 }
 
@@ -95,5 +110,4 @@ func ShowHelp() {
 	fmt.Println("Usage: urlchecker --url <url>")
 	fmt.Println("OR: urlchecker --url <url> --port <port>")
 	fmt.Println("")
-
 }
