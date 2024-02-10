@@ -27,7 +27,9 @@ You can also check multiple urls in the same:
 ### Docker
 
 ```bash
-docker run docker.io/extim/urlchecker:0.1.0 --url extim.su
+docker run docker.io/extim/urlchecker --url extim.su
+```
 OR
-docker run docker.io/extim/urlchecker:0.1.0 --url extim.su --port 443
+```bash
+docker run docker.io/extim/urlchecker --url extim.su --port 443
 ```
