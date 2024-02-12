@@ -66,5 +66,5 @@ docker run docker.io/extim/urlchecker --url google.com:53 --protocol udp --json
 Scanning list urls from file - url.txt
 
 ```console
-docker run -d$(pwd)url.txt:/opt/urlchecker/bin/ docker.io/extim/urlchecker --file url.txt
+docker run -v ./urls.txt:/opt/urlchecker/bin/url.txt docker.io/extim/urlchecker --file url.txt
 ```
