@@ -84,30 +84,28 @@ func main() {
 		log.Fatal("We can proceed, because of error: ", err)
 	}
 
-	switch {
-	case *versionFlag:
-		version.App()
-		return
-	case *listFromFile != "":
-		break
-	case search.Url == "":
-		help.Show()
-		return
-	}
-
 	var (
 		urls []string
 		wg   sync.WaitGroup
 		mu   sync.Mutex
 	)
 
-	if *listFromFile != "" {
+	switch {
+	case *versionFlag:
+		version.App()
+		return
+	case *listFromFile != "":
 		urls, err = importFromFile(*listFromFile)
 		if err != nil {
 			log.Fatal(err)
 		}
-	} else {
+
+	case search.Url != "":
 		urls = strings.Split(search.Url, ",")
+
+	default:
+		help.Show()
+		return
 	}
 
 	for _, url := range urls {
@@ -153,13 +151,14 @@ func (search *Search) Check(url string) string {
 		search.SearchResult.Port = search.Port
 	}
 
+	addr := search.SearchResult.Address + ":" + search.SearchResult.Port
 	timeout := search.Timeout
-	_, err := net.DialTimeout(search.Protocol, search.SearchResult.Address+":"+search.SearchResult.Port, timeout)
+	_, err := net.DialTimeout(search.Protocol, addr, timeout)
 	if err != nil {
 		search.SearchResult.State = "Failed"
-		return fmt.Sprintf("😿 [-] [%v]  %v", search.Protocol, search.SearchResult.Address)
+		return fmt.Sprintf("😿 [-] [%v]  %v", search.Protocol, addr)
 	} else {
 		search.SearchResult.State = "Success"
-		return fmt.Sprintf("😺 [+] [%v]  %v", search.Protocol, search.SearchResult.Address)
+		return fmt.Sprintf("😺 [+] [%v]  %v", search.Protocol, addr)
 	}
 }
