@@ -10,40 +10,61 @@ build:
 
 ```console
 make build
+cd ./bin/
 ```
 
 run:
 
 ```console
-./bin/urlchecker --url extim.su
+./urlchecker --url extim.su
 ```
 
 You can also check multiple urls in the same:
 
 ```console
-./bin/urlchecker --url extim.su,google.com:80,example.com:443
+./urlchecker --url extim.su,google.com:80,example.com:443
 ```
 
 Yu can specify protocol (--protocol). It's can be tcp or udp.
 
 ```console
-./bin/urlchecker --url google.com:53 --protocol udp
+./urlchecker --url google.com:53 --protocol udp
+```
+
+Scanning list urls from file - url.txt and output as JSON format
+
+```console
+./urlchecker --file url.txt --json
 ```
 
 ### Docker
+
+One url
 
 ```console
 docker run docker.io/extim/urlchecker --url extim.su
 ```
 
+List of urls with custom ports
+
 ```console
 docker run docker.io/extim/urlchecker --url extim.su,google.com:80,example.com:443
 ```
 
-```console
-docker run docker.io/extim/urlchecker --url extim.su:80,google.com:80,example.com:443 --port 443
-```
+List of urls with custom ports, and settings for default port
 
 ```console
-docker run docker.io/extim/urlchecker --url google.com:53 --protocol udp
+docker run docker.io/extim/urlchecker --url extim.su,google.com:80,example.com --port 443
+```
+
+Checking url with different protocol and JSON output
+
+```console
+docker run docker.io/extim/urlchecker --url google.com:53 --protocol udp --json
+```
+
+Scanning list urls from file - url.txt
+
+```console
+docker run -d$(pwd)url.txt:/opt/urlchecker/bin/ docker.io/extim/urlchecker --file url.txt
 ```
