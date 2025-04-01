@@ -4,6 +4,7 @@ The tiny cli-tool for health-checking urls
 
 ## Getting started
 
+### Using binary file
 This project requires Go to be installed. On OS X with Homebrew you can just run `brew install go`.
 
 build:
@@ -37,7 +38,7 @@ Scanning list urls from file - url.txt and output as JSON format
 ./urlchecker --file url.txt --json
 ```
 
-### Docker
+### Using Docker image
 
 One url
 
