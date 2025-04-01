@@ -42,29 +42,29 @@ Scanning list urls from file - url.txt and output as JSON format
 One url
 
 ```console
-docker run docker.io/extim/urlchecker --url extim.su
+docker run --rm docker.io/extim/urlchecker --url extim.su
 ```
 
 List of urls with custom ports
 
 ```console
-docker run docker.io/extim/urlchecker --url extim.su,google.com:80,example.com:443
+docker run --rm docker.io/extim/urlchecker --url extim.su,google.com:80,example.com:443
 ```
 
 List of urls with custom ports, and settings for default port
 
 ```console
-docker run docker.io/extim/urlchecker --url extim.su,google.com:80,example.com --port 443
+docker run --rm docker.io/extim/urlchecker --url extim.su,google.com:80,example.com --port 443
 ```
 
 Checking url with different protocol and JSON output
 
 ```console
-docker run docker.io/extim/urlchecker --url google.com:53 --protocol udp --json
+docker run --rm docker.io/extim/urlchecker --url google.com:53 --protocol udp --json
 ```
 
 Scanning list urls from file - url.txt
 
 ```console
-docker run -v ./urls.txt:/opt/urlchecker/bin/url.txt docker.io/extim/urlchecker --file url.txt
+docker run --rm -v ./urls.txt:/opt/urlchecker/bin/url.txt docker.io/extim/urlchecker --file url.txt
 ```
