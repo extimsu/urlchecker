@@ -25,6 +25,7 @@ node_modules/
 *.njsproj
 *.sln
 *.sw?
-.cursor
-.taskmaster
-.github
+.ta*
+.cu*
+.gi*
+.vi

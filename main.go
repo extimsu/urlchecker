@@ -552,13 +552,22 @@ func main() {
 			urlsWithGroups = append(urlsWithGroups, groupedURLs...)
 		}
 
-	case len(finalConfig.URLs) > 0:
-		// Process URLs from configuration
+	case len(finalConfig.URLs) > 0 || len(finalConfig.Groups) > 0:
+		// Process top-level URLs
 		for _, url := range finalConfig.URLs {
 			urlsWithGroups = append(urlsWithGroups, URLWithGroup{
 				URL:   strings.TrimSpace(url),
 				Group: finalConfig.GroupName,
 			})
+		}
+		// Process grouped URLs
+		for groupName, groupCfg := range finalConfig.Groups {
+			for _, url := range groupCfg.URLs {
+				urlsWithGroups = append(urlsWithGroups, URLWithGroup{
+					URL:   strings.TrimSpace(url),
+					Group: groupName,
+				})
+			}
 		}
 
 	default:
