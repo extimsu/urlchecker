@@ -1,0 +1,65 @@
+# Example YAML configuration file for urlchecker
+# This file demonstrates all available configuration options
+
+# Basic URL configuration
+urls:
+  - "example.com"
+  - "google.com"
+  - "github.com"
+
+# Alternative: specify a file containing URLs
+# file: "urls.txt"
+
+# Connection settings
+port: "80"
+protocol: "tcp"
+timeout: "5s"
+
+# Output configuration
+json_output: false
+
+# Metrics and monitoring
+metrics: true
+metrics_port: 9090
+
+# Exporter mode configuration
+exporter: true
+check_interval: "30s"
+workers: 5
+
+# Group configuration
+group_name: "default"
+groups:
+  web:
+    urls:
+      - "web1.example.com"
+      - "web2.example.com"
+    warning_threshold: "200ms"
+    critical_threshold: "500ms"
+    retry_count: 3
+    retry_delay: "1s"
+    circuit_breaker_threshold: 3
+    circuit_breaker_timeout: "30s"
+  
+  api:
+    urls:
+      - "api1.example.com"
+      - "api2.example.com"
+    warning_threshold: "100ms"
+    critical_threshold: "300ms"
+    retry_count: 5
+    retry_delay: "500ms"
+    circuit_breaker_threshold: 2
+    circuit_breaker_timeout: "60s"
+
+# Response time thresholds
+warning_threshold: "500ms"
+critical_threshold: "1s"
+
+# Retry configuration
+retry_count: 3
+retry_delay: "1s"
+
+# Circuit breaker configuration
+circuit_breaker_threshold: 5
+circuit_breaker_timeout: "60s"
