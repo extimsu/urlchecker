@@ -675,6 +675,17 @@ func main() {
 	}
 }
 
+// probe opens a connection to addr and closes it right away.
+// Every check goes through here: a connection that is never closed leaks a
+// socket and file descriptor per check and leaves a connection open on the target.
+func probe(protocol, addr string, timeout time.Duration) error {
+	conn, err := net.DialTimeout(protocol, addr, timeout)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
+}
+
 // retryWithExponentialBackoff performs a connection attempt with retry logic
 func (search *Search) retryWithExponentialBackoff(addr string) (time.Duration, error) {
 	var lastErr error
@@ -682,7 +693,7 @@ func (search *Search) retryWithExponentialBackoff(addr string) (time.Duration, e
 
 	for attempt := 0; attempt <= search.RetryCount; attempt++ {
 		// Attempt the connection
-		_, err := net.DialTimeout(search.Protocol, addr, search.Timeout)
+		err := probe(search.Protocol, addr, search.Timeout)
 
 		if err == nil {
 			// Success - return the total time taken
@@ -768,8 +779,8 @@ func (search *Search) Check(url string, exporterState *ExporterState) string {
 		responseTime, err = search.retryWithExponentialBackoff(addr)
 	} else {
 		// Original behavior without retries
+		err = probe(search.Protocol, addr, search.Timeout)
 		responseTime = time.Since(startTime)
-		_, err = net.DialTimeout(search.Protocol, addr, search.Timeout)
 	}
 
 	responseTimeSeconds := responseTime.Seconds()
@@ -1011,7 +1022,7 @@ func (wp *WorkerPool) processJob(job CheckJob, workerID int) {
 
 	// Perform the check
 	timeout := wp.search.Timeout
-	_, err := net.DialTimeout(job.Protocol, addr, timeout)
+	err := probe(job.Protocol, addr, timeout)
 
 	// Calculate response time
 	responseTime := time.Since(startTime).Seconds()

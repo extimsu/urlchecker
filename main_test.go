@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"testing"
@@ -388,5 +389,44 @@ func TestCircuitBreaker(t *testing.T) {
 
 	if cb.GetState() != CircuitOpen {
 		t.Errorf("Expected state to be open after failure in half-open state, got %v", cb.GetState())
+	}
+}
+
+// TestChecksCloseConnections makes sure every check path closes the
+// connection it opens. The server side reads from each accepted connection:
+// a closed client gives io.EOF, a leaked one blocks until the deadline.
+func TestChecksCloseConnections(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
+	host, port, _ := net.SplitHostPort(addr)
+
+	search := &Search{Port: port, Protocol: "tcp", Timeout: time.Second,
+		WarnThreshold: time.Second, CritThreshold: 2 * time.Second}
+	retrying := *search
+	retrying.RetryCount, retrying.RetryDelay = 1, 10*time.Millisecond
+	pool := NewWorkerPool(1, NewExporterState(), search)
+
+	checks := map[string]func(){
+		"Check":            func() { search.Check(addr, nil) },
+		"Check with retry": func() { retrying.Check(addr, nil) },
+		"worker job":       func() { pool.processJob(CheckJob{URL: host + ":" + port, Protocol: "tcp"}, 1) },
+	}
+	for name, run := range checks {
+		t.Run(name, func(t *testing.T) {
+			run()
+			conn, err := ln.Accept()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			if _, err := conn.Read(make([]byte, 1)); err != io.EOF {
+				t.Fatalf("connection left open by %s: read returned %v, want io.EOF", name, err)
+			}
+		})
 	}
 }
