@@ -466,7 +466,7 @@ func main() {
 
 	// Create CLI overrides and merge them (CLI takes precedence)
 	cliOverrides := &config.Config{
-		URLs:                    []string{*url},
+		URLs:                    parseURLList(*url),
 		Port:                    *port,
 		Protocol:                *protocol,
 		Timeout:                 *timeout,
@@ -673,6 +673,18 @@ func main() {
 		// Run single check and exit (original behavior)
 		runHealthChecks(search, urlsWithGroups, finalConfig.JSONOutput, &wg, &mu, nil)
 	}
+}
+
+// parseURLList splits the comma-separated --url value and drops empty entries.
+// An empty flag gives nil, so the urls from a config file are kept.
+func parseURLList(s string) []string {
+	var urls []string
+	for _, u := range strings.Split(s, ",") {
+		if u = strings.TrimSpace(u); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return urls
 }
 
 // probe opens a connection to addr and closes it right away.

@@ -430,3 +430,17 @@ func TestChecksCloseConnections(t *testing.T) {
 		})
 	}
 }
+
+func TestParseURLList(t *testing.T) {
+	tests := map[string][]string{
+		"":                               nil,
+		"example.com":                    {"example.com"},
+		"github.com:443, 1.1.1.1:443,,x": {"github.com:443", "1.1.1.1:443", "x"},
+	}
+	for in, want := range tests {
+		got := parseURLList(in)
+		if fmt.Sprint(got) != fmt.Sprint(want) || len(got) != len(want) {
+			t.Errorf("parseURLList(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
