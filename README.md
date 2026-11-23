@@ -307,3 +307,7 @@ UDP has no handshake, and urlchecker sends no payload. A UDP check passes as soo
 - ICMP is IPv4 only.
 - There is one socket per ICMP target. That's fine for tens of targets. A shared socket would scale better to hundreds.
 - Exporter mode does not retry TCP or UDP checks and has no circuit breaker. Each interval is a single attempt.
+
+## License
+
+[MIT](LICENSE)

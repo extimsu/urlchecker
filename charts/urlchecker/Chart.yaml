@@ -23,6 +23,7 @@ maintainers:
     email: it@extim.su
     url: https://github.com/extimsu
 annotations:
+  artifacthub.io/license: MIT
   artifacthub.io/images: |
     - name: urlchecker
       image: docker.io/extim/urlchecker:0.2.0
