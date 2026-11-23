@@ -67,10 +67,13 @@ jobs:
           fi
           helm install probe "$CHART" -n $ns -f "$CHART/ci/${{ matrix.mode }}-values.yaml" --wait --timeout 3m
           sleep 10
-          helm test probe -n $ns --logs
+          # The test pod is deleted on success; a failed one stays for the debug step.
+          helm test probe -n $ns
       - name: debug
         if: failure()
-        run: kubectl get pods -A -o wide; kubectl -n default logs -l app.kubernetes.io/name=urlchecker --tail=50 || true
+        run: |
+          kubectl get pods -A -o wide
+          for ns in default restricted; do kubectl -n $ns logs -l app.kubernetes.io/name=urlchecker --tail=50 --prefix || true; done
 
   release:
     if: startsWith(github.ref, 'refs/tags/chart-v')
