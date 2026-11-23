@@ -1,0 +1,17 @@
+# CI install test: host-network DaemonSet with raw ICMP sockets.
+workload:
+  kind: DaemonSet
+hostNetwork: true
+icmp:
+  rawSocket: true
+metrics:
+  port: 19375
+service:
+  port: 19375
+tolerations:
+  - operator: Exists
+targets:
+  - icmp://127.0.0.1
+  - 127.0.0.1:10250
+checks:
+  interval: 5s

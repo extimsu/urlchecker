@@ -1,0 +1,101 @@
+name: chart
+
+on:
+  pull_request:
+    paths: [charts/**, .github/workflows/chart.yaml]
+  push:
+    branches: [master]
+    paths: [charts/**, .github/workflows/chart.yaml]
+    tags: [chart-v*]
+
+permissions:
+  contents: read
+
+env:
+  CHART: charts/urlchecker
+  HELM_VERSION: v3.19.0
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: helm lint
+        run: |
+          for f in "$CHART"/ci/*.yaml; do helm lint "$CHART" --strict -f "$f"; done
+      - name: helm unittest
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version v1.1.0
+          helm unittest "$CHART"
+      - name: kubeconform
+        run: |
+          for f in "$CHART"/ci/*.yaml; do
+            helm template t "$CHART" -f "$f" --set serviceMonitor.enabled=true --set podDisruptionBudget.enabled=true \
+              | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
+          done
+      - name: README is up to date (helm-docs)
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w jnorwood/helm-docs:v1.14.2 --chart-search-root charts
+          git diff --exit-code -- "$CHART/README.md"
+
+  install:
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [deployment, daemonset]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: helm/kind-action@v1
+      - name: install and helm test
+        run: |
+          ns=default
+          if [ "${{ matrix.mode }}" = deployment ]; then
+            # The Deployment must pass the restricted Pod Security Standard.
+            ns=restricted
+            kubectl create ns $ns
+            kubectl label ns $ns pod-security.kubernetes.io/enforce=restricted
+          fi
+          helm install probe "$CHART" -n $ns -f "$CHART/ci/${{ matrix.mode }}-values.yaml" --wait --timeout 3m
+          sleep 10
+          helm test probe -n $ns --logs
+      - name: debug
+        if: failure()
+        run: kubectl get pods -A -o wide; kubectl -n default logs -l app.kubernetes.io/name=urlchecker --tail=50 || true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/chart-v')
+    needs: install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # keyless cosign signature
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: sigstore/cosign-installer@v3
+      - name: tag matches Chart.yaml version
+        run: |
+          v=$(yq '.version' "$CHART/Chart.yaml")
+          [ "chart-v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != chart-v$v"; exit 1; }
+      - name: package, push and sign
+        env:
+          REGISTRY: ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          helm package "$CHART" -d dist
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          out=$(helm push dist/*.tgz "oci://$REGISTRY" 2>&1); echo "$out"
+          digest=$(echo "$out" | awk '/^Digest:/ {print $2}')
+          cosign sign --yes "$REGISTRY/urlchecker@$digest"

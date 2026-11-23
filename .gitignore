@@ -2,7 +2,7 @@ bin
 vendor
 .DS_Store
 *.txt
-urlchecker
+/urlchecker
 # Logs
 logs
 *.log
@@ -29,3 +29,4 @@ node_modules/
 .cu*
 .gi*
 .vi
+!.github/

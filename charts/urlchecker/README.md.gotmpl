@@ -1,0 +1,133 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}
+
+The exporter checks TCP and UDP targets every `checks.interval`. It pings each
+`icmp://` target every `checks.pingInterval` and exports
+smokeping_prober-style counters, so you can alert on packet loss. The
+[urlchecker README](https://github.com/extimsu/urlchecker#readme) covers the
+target syntax and every metric.
+
+## Install
+
+```console
+helm install probe oci://ghcr.io/extimsu/charts/urlchecker \
+  --version {{ template "chart.version" . }} \
+  --namespace monitoring --create-namespace \
+  --set 'targets={example.com:443,icmp://1.1.1.1}'
+```
+
+Upgrade with `helm upgrade`. Remove the release with `helm uninstall probe -n monitoring`.
+
+## Endpoint checks (Deployment)
+
+This is the default. It runs one pod on the pod network that checks each target
+from inside the cluster.
+
+```yaml
+targets:
+  - api.example.com:443
+  - udp://10.0.0.53:53
+  - icmp://10.0.0.1
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack   # whatever your Prometheus selects
+```
+
+The pod runs as the image's non-root user (UID 65532) with every capability
+dropped and a read-only root filesystem. For ICMP, the chart sets the safe
+sysctl `net.ipv4.ping_group_range` to the pod's own group. That lets the
+exporter use the kernel's unprivileged ping socket without `NET_RAW`, and the
+pod still passes the `restricted` Pod Security Standard.
+
+## Node-to-node packet loss (DaemonSet)
+
+This mode runs one pod per node in the node's network namespace. Each pod pings
+every node, so the loss you measure is on the node network itself, not on the
+CNI overlay.
+
+```yaml
+workload:
+  kind: DaemonSet
+hostNetwork: true
+icmp:
+  rawSocket: true          # UID 0 with only NET_RAW
+tolerations:
+  - operator: Exists       # include control-plane nodes
+metrics:
+  port: 9375               # must be free on every node
+service:
+  port: 9375
+targets:                   # every node's internal IP, plus a TCP port to check
+  - icmp://10.0.0.11
+  - 10.0.0.11:10250
+  - icmp://10.0.0.12
+  - 10.0.0.12:10250
+serviceMonitor:
+  enabled: true
+  relabelings:             # label each series with the probing node
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+```
+
+Pod sysctls can't change the node's own network namespace. So with
+`hostNetwork` the unprivileged ping socket works only if the nodes'
+`net.ipv4.ping_group_range` already includes the pod's group. If it doesn't,
+use `icmp.rawSocket`. The chart refuses `icmp://` targets with `hostNetwork`
+unless `icmp.rawSocket` is set. A `restricted` namespace rejects this mode, so
+install it in a namespace labelled `pod-security.kubernetes.io/enforce: privileged`
+or `baseline`.
+
+The loss per pair, from the probing node to each target, is:
+
+```promql
+1 - (
+  rate(urlchecker_icmp_response_duration_seconds_count[5m])
+    / rate(urlchecker_icmp_requests_total[5m])
+)
+```
+
+To alert per bad node rather than per pair, count how many of a node's peers
+see loss, and fire when it is half or more. A single bad path then doesn't
+page, and a bad node does.
+
+## Targets from your own ConfigMap
+
+```yaml
+existingConfigMap: my-targets   # key urls.txt, one target per line
+```
+
+When the ConfigMap changes, restart the pods yourself, because the chart only
+hashes `targets`.
+
+## Image
+
+`image.tag` defaults to the chart's `appVersion`. For an immutable pin, set
+`image.digest`. To pull through a proxy, set `image.registry`, for example
+`harbor.example.com/docker.io`.
+
+## Test
+
+```console
+helm test probe -n monitoring
+```
+
+The test pod fetches `/metrics` and checks that at least one check has run.
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}
+
+## Development
+
+```console
+helm lint charts/urlchecker --strict --set 'targets={a:1}'
+helm unittest charts/urlchecker
+helm-docs --chart-search-root charts   # regenerate this README
+```
+
+CI runs the same checks plus an install test on kind in both modes. Publishing
+happens on a `chart-v<version>` tag.

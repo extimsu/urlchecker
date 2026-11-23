@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "workload": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["Deployment", "DaemonSet"] }
+      },
+      "required": ["kind"]
+    },
+    "replicaCount": { "type": "integer", "minimum": 0 },
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": { "type": "string" },
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      },
+      "required": ["repository"]
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^((tcp|udp|TCP|UDP)://[^\\s:/]+:[0-9]+|(icmp|ICMP)://[^\\s:/]+|[^\\s:/]+(:[0-9]+)?)$"
+      }
+    },
+    "existingConfigMap": { "type": "string" },
+    "configMapKey": { "type": "string", "minLength": 1 },
+    "checks": {
+      "type": "object",
+      "properties": {
+        "defaultPort": { "type": ["string", "integer"] },
+        "defaultProtocol": { "type": "string", "enum": ["tcp", "udp", "icmp"] },
+        "interval": { "$ref": "#/definitions/duration" },
+        "pingInterval": { "$ref": "#/definitions/duration" },
+        "timeout": { "$ref": "#/definitions/duration" },
+        "workers": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "extraArgs": { "type": "array", "items": { "type": "string" } },
+    "icmp": {
+      "type": "object",
+      "properties": { "rawSocket": { "type": "boolean" } }
+    },
+    "hostNetwork": { "type": "boolean" },
+    "dnsPolicy": {
+      "type": "string",
+      "enum": ["", "ClusterFirst", "ClusterFirstWithHostNet", "Default", "None"]
+    },
+    "metrics": {
+      "type": "object",
+      "properties": { "port": { "$ref": "#/definitions/port" } }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port": { "$ref": "#/definitions/port" }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "interval": { "$ref": "#/definitions/duration" },
+        "scrapeTimeout": { "$ref": "#/definitions/duration" }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["integer", "string"] }
+      }
+    }
+  },
+  "definitions": {
+    "duration": { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+  }
+}
