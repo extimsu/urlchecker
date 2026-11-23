@@ -26,6 +26,7 @@ metrics_port: 9090
 exporter: true
 check_interval: "30s"
 workers: 5
+ping_interval: "1s" # for icmp:// targets
 
 # Group configuration
 group_name: "default"

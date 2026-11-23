@@ -15,6 +15,7 @@ func Show() {
 	fmt.Println("urlchecker --file <filename>")
 	fmt.Println("urlchecker --metrics --metrics-port <port> --check-interval <duration>")
 	fmt.Println("urlchecker --exporter --workers <count> --check-interval <duration> (includes metrics)")
+	fmt.Println("urlchecker --exporter --url icmp://<host> --ping-interval <duration> (ICMP packet loss)")
 	fmt.Println("")
 	fmt.Println("For more information try --help")
 }
