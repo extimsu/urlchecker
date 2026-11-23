@@ -1,0 +1,6 @@
+# CI install test: Deployment on the pod network, non-root, unprivileged ping.
+targets:
+  - kubernetes.default.svc.cluster.local:443
+  - icmp://127.0.0.1
+checks:
+  interval: 5s

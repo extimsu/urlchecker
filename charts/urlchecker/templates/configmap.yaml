@@ -1,0 +1,15 @@
+{{- include "urlchecker.validate" . }}
+{{- if not .Values.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "urlchecker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "urlchecker.labels" . | nindent 4 }}
+data:
+  {{ .Values.configMapKey }}: |
+    {{- range .Values.targets }}
+    {{ . }}
+    {{- end }}
+{{- end }}

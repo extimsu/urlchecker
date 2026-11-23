@@ -1,0 +1,142 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: urlchecker
+templates:
+  - templates/configmap.yaml
+  - templates/workload.yaml
+  - templates/service.yaml
+  - templates/servicemonitor.yaml
+  - templates/poddisruptionbudget.yaml
+release:
+  name: probe
+  namespace: monitoring
+set:
+  targets: [example.com:443, icmp://1.1.1.1]
+tests:
+  - it: renders the targets one per line
+    template: templates/configmap.yaml
+    asserts:
+      - equal:
+          path: data["urls.txt"]
+          value: |
+            example.com:443
+            icmp://1.1.1.1
+
+  - it: runs a non-root Deployment with the ping sysctl for its own group
+    template: templates/workload.yaml
+    asserts:
+      - isKind: { of: Deployment }
+      - equal: { path: spec.template.spec.securityContext.runAsUser, value: 65532 }
+      - equal: { path: spec.template.spec.securityContext.runAsNonRoot, value: true }
+      - contains:
+          path: spec.template.spec.securityContext.sysctls
+          content: { name: net.ipv4.ping_group_range, value: "65532 65532" }
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities
+          value: { drop: [ALL] }
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: false }
+      - notExists: { path: spec.template.spec.hostNetwork }
+
+  - it: runs a host-network DaemonSet with only NET_RAW for raw ICMP
+    template: templates/workload.yaml
+    set:
+      workload.kind: DaemonSet
+      hostNetwork: true
+      icmp.rawSocket: true
+      tolerations: [{ operator: Exists }]
+    asserts:
+      - isKind: { of: DaemonSet }
+      - notExists: { path: spec.replicas }
+      - equal: { path: spec.updateStrategy.type, value: RollingUpdate }
+      - equal: { path: spec.template.spec.hostNetwork, value: true }
+      - equal: { path: spec.template.spec.dnsPolicy, value: ClusterFirstWithHostNet }
+      - equal: { path: spec.template.spec.securityContext.runAsUser, value: 0 }
+      - equal: { path: spec.template.spec.securityContext.runAsNonRoot, value: false }
+      - notExists: { path: spec.template.spec.securityContext.sysctls }
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities
+          value: { drop: [ALL], add: [NET_RAW] }
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+
+  - it: refuses icmp targets on the host network without raw sockets
+    template: templates/workload.yaml
+    set:
+      workload.kind: DaemonSet
+      hostNetwork: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "icmp:// targets with hostNetwork need icmp.rawSocket=true: pod sysctls cannot change the node's ping_group_range"
+
+  - it: needs at least one target
+    template: templates/workload.yaml
+    set:
+      targets: []
+    asserts:
+      - failedTemplate:
+          errorMessage: "set targets (or existingConfigMap): urlchecker needs at least one target"
+
+  - it: uses an existing ConfigMap and skips its own
+    set:
+      targets: []
+      existingConfigMap: my-targets
+    asserts:
+      - hasDocuments: { count: 0 }
+        template: templates/configmap.yaml
+      - equal:
+          path: spec.template.spec.volumes[0].configMap.name
+          value: my-targets
+        template: templates/workload.yaml
+
+  - it: passes the check settings as flags
+    template: templates/workload.yaml
+    set:
+      checks.pingInterval: 2s
+      extraArgs: [--warn-threshold=200ms]
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: "--exporter" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "--file=/etc/urlchecker/urls.txt" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "--ping-interval=2s" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "--warn-threshold=200ms" }
+
+  - it: restarts pods when the targets change
+    template: templates/workload.yaml
+    asserts:
+      - exists: { path: 'spec.template.metadata.annotations["checksum/targets"]' }
+
+  - it: pins the image by digest when one is set
+    template: templates/workload.yaml
+    set:
+      image.digest: sha256:61f4d1869a5506810348669a1ac51414a84c439a1c60deec543043fdb092b71a
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/extim/urlchecker@sha256:61f4d1869a5506810348669a1ac51414a84c439a1c60deec543043fdb092b71a
+
+  - it: defaults the image tag to the appVersion
+    template: templates/workload.yaml
+    chart:
+      appVersion: 9.9.9
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].image", value: docker.io/extim/urlchecker:9.9.9 }
+
+  - it: creates a ServiceMonitor selecting its Service
+    template: templates/servicemonitor.yaml
+    set:
+      serviceMonitor.enabled: true
+      serviceMonitor.labels: { release: prometheus }
+    asserts:
+      - isKind: { of: ServiceMonitor }
+      - equal: { path: metadata.labels.release, value: prometheus }
+      - equal: { path: "spec.endpoints[0].port", value: metrics }
+      - equal: { path: 'spec.selector.matchLabels["app.kubernetes.io/instance"]', value: probe }
+
+  - it: creates a PodDisruptionBudget only for a Deployment
+    template: templates/poddisruptionbudget.yaml
+    set:
+      podDisruptionBudget.enabled: true
+      workload.kind: DaemonSet
+      hostNetwork: true
+      icmp.rawSocket: true
+    asserts:
+      - hasDocuments: { count: 0 }

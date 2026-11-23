@@ -1,0 +1,195 @@
+# Default values for urlchecker.
+# Comments starting with "# --" feed the generated README (helm-docs).
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the full resource name.
+fullnameOverride: ""
+# -- Labels added to every resource.
+commonLabels: {}
+
+workload:
+  # -- `Deployment` checks endpoints from the pod network. `DaemonSet` runs one
+  # pod per node, usually with `hostNetwork: true`, for node-to-node checks.
+  kind: Deployment
+
+# -- Pods for `workload.kind: Deployment`. Each replica checks every target, so
+# more than one replica only adds vantage points.
+replicaCount: 1
+
+image:
+  # -- Image registry.
+  registry: docker.io
+  # -- Image repository.
+  repository: extim/urlchecker
+  # -- Image tag. Defaults to the chart appVersion.
+  tag: ""
+  # -- Image digest (`sha256:...`). When set it wins over `tag`.
+  digest: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Pull secrets, e.g. `[{name: regcred}]`.
+imagePullSecrets: []
+
+# -- Targets to check, one per entry. `host`, `host:port`, `tcp://host:port`,
+# `udp://host:port` or `icmp://host`. Rendered into a ConfigMap. Ignored when
+# `existingConfigMap` is set.
+targets: []
+# - example.com:443
+# - icmp://1.1.1.1
+
+# -- Use an existing ConfigMap with the target list instead of `targets`.
+existingConfigMap: ""
+# -- Key of the target list in the ConfigMap.
+configMapKey: urls.txt
+
+checks:
+  # -- Port for targets without one.
+  defaultPort: "80"
+  # -- Protocol for targets without a prefix: `tcp`, `udp` or `icmp`.
+  defaultProtocol: tcp
+  # -- Interval between TCP/UDP checks.
+  interval: 30s
+  # -- Interval between echo requests per `icmp://` target.
+  pingInterval: 1s
+  # -- TCP connect timeout. The echo-reply wait is capped at `pingInterval`.
+  timeout: 5s
+  # -- Concurrent TCP/UDP checks.
+  workers: 5
+
+# -- Extra command-line flags, e.g. `["--warn-threshold=200ms"]`.
+extraArgs: []
+# -- Extra environment variables for the container.
+extraEnv: []
+
+icmp:
+  # -- Open raw ICMP sockets: runs the container as UID 0 with only the
+  # `NET_RAW` capability. Needed with `hostNetwork: true` when the nodes'
+  # `net.ipv4.ping_group_range` does not include the pod's group. When false,
+  # the pod gets the `net.ipv4.ping_group_range` sysctl so the non-root user can
+  # use the unprivileged ping socket (pod network only).
+  rawSocket: false
+
+# -- Use the node's network namespace. Set it for node-to-node probes with
+# `workload.kind: DaemonSet`. Choose a free `metrics.port` on the nodes.
+hostNetwork: false
+# -- Pod DNS policy. Empty means `ClusterFirstWithHostNet` with `hostNetwork`,
+# else the Kubernetes default.
+dnsPolicy: ""
+
+metrics:
+  # -- Port of the `/metrics` endpoint.
+  port: 9090
+
+service:
+  # -- Create a Service for the metrics port.
+  enabled: true
+  # -- Service type.
+  type: ClusterIP
+  # -- Service port.
+  port: 9090
+  # -- Service annotations.
+  annotations: {}
+
+serviceMonitor:
+  # -- Create a Prometheus Operator ServiceMonitor (the VictoriaMetrics operator
+  # converts it too). Needs `service.enabled`.
+  enabled: false
+  # -- Namespace for the ServiceMonitor. Defaults to the release namespace.
+  namespace: ""
+  # -- Extra labels, e.g. the selector your Prometheus uses.
+  labels: {}
+  # -- Scrape interval.
+  interval: 30s
+  # -- Scrape timeout.
+  scrapeTimeout: 10s
+  # -- Relabelings applied before the scrape.
+  relabelings: []
+  # -- Relabelings applied to scraped samples.
+  metricRelabelings: []
+
+serviceAccount:
+  # -- Create a ServiceAccount.
+  create: true
+  # -- ServiceAccount name. Generated when empty and `create` is true.
+  name: ""
+  # -- ServiceAccount annotations.
+  annotations: {}
+
+# -- Mount the ServiceAccount token. urlchecker does not call the Kubernetes API.
+automountServiceAccountToken: false
+
+# -- Pod annotations.
+podAnnotations: {}
+# -- Pod labels.
+podLabels: {}
+
+# -- Pod security context. The UID/GID match the image's distroless `nonroot`
+# user; `icmp.rawSocket` switches the container to UID 0.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context. `icmp.rawSocket` adds `NET_RAW`.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# -- Resource requests and limits.
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+
+livenessProbe:
+  httpGet:
+    path: /metrics
+    port: metrics
+  periodSeconds: 30
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /metrics
+    port: metrics
+  periodSeconds: 10
+
+# -- Deployment strategy or DaemonSet updateStrategy.
+updateStrategy:
+  type: RollingUpdate
+
+podDisruptionBudget:
+  # -- Create a PodDisruptionBudget (Deployment only).
+  enabled: false
+  # -- Minimum available pods.
+  minAvailable: 1
+
+# -- Priority class name.
+priorityClassName: ""
+# -- Node selector.
+nodeSelector: {}
+# -- Tolerations. For a DaemonSet on every node, use `[{operator: Exists}]`.
+tolerations: []
+# -- Affinity rules.
+affinity: {}
+# -- Topology spread constraints.
+topologySpreadConstraints: []
+# -- Termination grace period.
+terminationGracePeriodSeconds: 10
+
+# -- Extra volumes for the pod.
+extraVolumes: []
+# -- Extra volume mounts for the container.
+extraVolumeMounts: []
+
+tests:
+  # -- Image for the `helm test` pod that fetches `/metrics`.
+  image: docker.io/library/busybox:1.37.0

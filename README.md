@@ -8,10 +8,11 @@ Contents:
 - [How-to guides](#how-to-guides): recipes for common jobs.
 - [Reference](#reference): targets, flags, config file and metrics.
 - [Explanation](#explanation): how the checks work and what they do not tell you.
+- [Helm chart](charts/urlchecker/README.md): every value of the Kubernetes chart.
 
 ## Quick start
 
-You need Go 1.23 or later, or Docker.
+You need Go 1.23 or later, or Docker. To run it on Kubernetes, see [Deploy on Kubernetes with the Helm chart](#deploy-on-kubernetes-with-the-helm-chart).
 
 1. Build the binary:
 
@@ -108,7 +109,10 @@ urlchecker tries a raw ICMP socket first, then the unprivileged ping socket. Use
 - **Linux, unprivileged socket.** The process group ID must be inside `net.ipv4.ping_group_range`. Docker sets this to `0 2147483647` by default, so the image's `nonroot` user can ping.
 - **Raw socket without full root.** Give the process `CAP_NET_RAW`.
 
-In Kubernetes, many nodes set `ping_group_range` to `1 0`, which disables the unprivileged socket. Then run as UID 0 with only `NET_RAW`:
+In Kubernetes, the setup depends on the pod's network:
+
+- **Pod network.** Set the safe sysctl `net.ipv4.ping_group_range` on the pod to its own group, for example `"65532 65532"`. The non-root user can then ping, and the pod still passes the `restricted` Pod Security Standard. The Helm chart does this by default.
+- **`hostNetwork: true`.** Pod sysctls can't change the node's network namespace, and many nodes set `ping_group_range` to `1 0`, which disables the unprivileged socket. Run as UID 0 with only `NET_RAW` instead. The chart does this when `icmp.rawSocket=true`:
 
 ```yaml
 securityContext:
@@ -122,7 +126,7 @@ securityContext:
 
 If neither socket can be opened, urlchecker logs `open ICMP socket: raw: ...; unprivileged: ...` and tries again on every interval.
 
-### Run the exporter in Docker or Kubernetes
+### Run the exporter in Docker
 
 ```console
 docker run -d --name urlchecker -p 9090:9090 \
@@ -130,7 +134,46 @@ docker run -d --name urlchecker -p 9090:9090 \
   --exporter --url example.com:443,icmp://1.1.1.1 --workers 3 --check-interval 30s
 ```
 
-To probe between Kubernetes nodes, run it as a DaemonSet with `hostNetwork: true`. Mount the target file from a ConfigMap and scrape port `--metrics-port`. Each pod then measures from its own node to every target. The pod IP is the node IP, so you can drop the self-pair at scrape time.
+### Deploy on Kubernetes with the Helm chart
+
+The chart lives in [`charts/urlchecker`](charts/urlchecker) and is published to
+`oci://ghcr.io/extimsu/charts/urlchecker`.
+
+1. Check endpoints from inside the cluster. This runs a non-root Deployment:
+
+   ```console
+   helm install probe oci://ghcr.io/extimsu/charts/urlchecker \
+     -n monitoring --create-namespace \
+     --set 'targets={api.example.com:443,icmp://10.0.0.1}' \
+     --set serviceMonitor.enabled=true
+   ```
+
+2. To measure packet loss between nodes, run one pod per node on the host
+   network. List every node's IP as an `icmp://` target:
+
+   ```yaml
+   # values-nodes.yaml
+   workload: { kind: DaemonSet }
+   hostNetwork: true
+   icmp: { rawSocket: true }      # UID 0 with only NET_RAW
+   tolerations: [{ operator: Exists }]
+   metrics: { port: 9375 }        # must be free on the nodes
+   service: { port: 9375 }
+   targets: [icmp://10.0.0.11, icmp://10.0.0.12, icmp://10.0.0.13]
+   ```
+
+   ```console
+   helm install node-probes oci://ghcr.io/extimsu/charts/urlchecker -n monitoring -f values-nodes.yaml
+   ```
+
+3. Check the release:
+
+   ```console
+   helm test probe -n monitoring
+   ```
+
+The [chart README](charts/urlchecker/README.md) lists every value. It also
+covers ICMP privileges in each mode and Pod Security levels.
 
 ### Use a config file
 

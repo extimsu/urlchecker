@@ -1,0 +1,28 @@
+apiVersion: v2
+name: urlchecker
+description: >-
+  Prometheus exporter that checks TCP, UDP and ICMP reachability. Runs as a
+  Deployment for endpoint checks or as a host-network DaemonSet for
+  node-to-node packet loss.
+type: application
+version: 0.1.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/extimsu/urlchecker
+sources:
+  - https://github.com/extimsu/urlchecker
+keywords:
+  - monitoring
+  - prometheus
+  - exporter
+  - icmp
+  - packet-loss
+  - blackbox
+maintainers:
+  - name: Alexander Extim
+    email: it@extim.su
+    url: https://github.com/extimsu
+annotations:
+  artifacthub.io/images: |
+    - name: urlchecker
+      image: docker.io/extim/urlchecker:0.2.0

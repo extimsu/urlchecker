@@ -1,0 +1,139 @@
+{{- include "urlchecker.validate" . }}
+{{- $isDeployment := eq .Values.workload.kind "Deployment" }}
+apiVersion: apps/v1
+kind: {{ .Values.workload.kind }}
+metadata:
+  name: {{ include "urlchecker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "urlchecker.labels" . | nindent 4 }}
+spec:
+  {{- if $isDeployment }}
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+  {{- else }}
+  updateStrategy:
+  {{- end }}
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "urlchecker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "urlchecker.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if not .Values.existingConfigMap }}
+        checksum/targets: {{ toJson .Values.targets | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "urlchecker.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.hostNetwork }}
+      hostNetwork: true
+      {{- end }}
+      {{- if or .Values.dnsPolicy .Values.hostNetwork }}
+      dnsPolicy: {{ .Values.dnsPolicy | default "ClusterFirstWithHostNet" }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- $pod := deepCopy .Values.podSecurityContext }}
+        {{- if .Values.icmp.rawSocket }}
+        {{- $_ := set $pod "runAsNonRoot" false }}
+        {{- $_ := set $pod "runAsUser" 0 }}
+        {{- $_ := set $pod "runAsGroup" 0 }}
+        {{- else if not .Values.hostNetwork }}
+        {{- /* Unprivileged ping socket for the pod's group only. Safe sysctl, allowed by the restricted Pod Security Standard. */}}
+        {{- $gid := toString (default 65532 $pod.runAsGroup) }}
+        {{- $_ := set $pod "sysctls" (append ($pod.sysctls | default list) (dict "name" "net.ipv4.ping_group_range" "value" (printf "%s %s" $gid $gid))) }}
+        {{- end }}
+        {{- toYaml $pod | nindent 8 }}
+      containers:
+        - name: urlchecker
+          image: {{ include "urlchecker.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --exporter
+            - --file=/etc/urlchecker/{{ .Values.configMapKey }}
+            - --metrics-port={{ .Values.metrics.port }}
+            - --port={{ .Values.checks.defaultPort }}
+            - --protocol={{ .Values.checks.defaultProtocol }}
+            - --check-interval={{ .Values.checks.interval }}
+            - --ping-interval={{ .Values.checks.pingInterval }}
+            - --timeout={{ .Values.checks.timeout }}
+            - --workers={{ .Values.checks.workers }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          securityContext:
+            {{- $ctr := deepCopy .Values.securityContext }}
+            {{- if .Values.icmp.rawSocket }}
+            {{- $caps := deepCopy ($ctr.capabilities | default dict) }}
+            {{- $_ := set $caps "add" (append ($caps.add | default list) "NET_RAW" | uniq) }}
+            {{- $_ := set $ctr "capabilities" $caps }}
+            {{- end }}
+            {{- toYaml $ctr | nindent 12 }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: targets
+              mountPath: /etc/urlchecker
+              readOnly: true
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: targets
+          configMap:
+            name: {{ include "urlchecker.configMapName" . }}
+            items:
+              - key: {{ .Values.configMapKey }}
+                path: {{ .Values.configMapKey }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
