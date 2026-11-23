@@ -425,7 +425,7 @@ func importFromFileWithGroups(filename string) ([]URLWithGroup, error) {
 func main() {
 	url := flag.String("url", "", "a url to checking, ex: example.com")
 	port := flag.String("port", "80", "a port for checking, ex: 443")
-	protocol := flag.String("protocol", "tcp", "a type of protocol (tcp or udp), ex: udp")
+	protocol := flag.String("protocol", "tcp", "default protocol for targets without a prefix (tcp, udp or icmp), ex: udp")
 	timeout := flag.String("timeout", "5s", "a timeout for checking in seconds, ex: 3s")
 	listFromFile := flag.String("file", "", "Import urls from file, ex: urls.txt")
 	jsonOutput := flag.Bool("json", false, "JSON output")
@@ -435,6 +435,7 @@ func main() {
 	metricsPort := flag.Int("metrics-port", 9090, "Port for Prometheus metrics endpoint")
 	checkInterval := flag.Duration("check-interval", 30*time.Second, "Interval between health checks when running in metrics mode")
 	workerCount := flag.Int("workers", 5, "Number of worker goroutines for exporter mode")
+	pingInterval := flag.Duration("ping-interval", time.Second, "Interval between echo requests to each icmp target in exporter mode")
 	groupName := flag.String("group", "", "Group name for URL health checks")
 	warnThreshold := flag.Duration("warn-threshold", 500*time.Millisecond, "Warning threshold for response time")
 	critThreshold := flag.Duration("crit-threshold", 1*time.Second, "Critical threshold for response time")
@@ -477,6 +478,7 @@ func main() {
 		MetricsPort:             *metricsPort,
 		CheckInterval:           checkInterval.String(),
 		Workers:                 *workerCount,
+		PingInterval:            pingInterval.String(),
 		GroupName:               *groupName,
 		WarningThreshold:        warnThreshold.String(),
 		CriticalThreshold:       critThreshold.String(),
@@ -600,6 +602,24 @@ func main() {
 		// Start worker pool
 		workerPool.Start()
 
+		// icmp targets are pinged continuously, like smokeping_prober; tcp and udp
+		// targets go through the worker pool every check interval.
+		pingIntervalDuration, err := time.ParseDuration(finalConfig.PingInterval)
+		if err != nil || pingIntervalDuration <= 0 {
+			log.Fatalf("Invalid ping interval value: %q", finalConfig.PingInterval)
+		}
+		stopPingers := make(chan struct{})
+		var dialJobs []CheckJob
+		for _, urlWithGroup := range urlsWithGroups {
+			proto, target := splitScheme(urlWithGroup.URL, search.Protocol)
+			if proto == "icmp" {
+				log.Printf("Pinging %s every %v", target, pingIntervalDuration)
+				go runPinger(target, pingIntervalDuration, search.Timeout, stopPingers)
+				continue
+			}
+			dialJobs = append(dialJobs, CheckJob{URL: target, Protocol: proto, Search: search})
+		}
+
 		// Start metrics server (included in exporter mode)
 		go startMetricsServer(finalConfig.MetricsPort)
 		log.Printf("Prometheus metrics server started on port %d", finalConfig.MetricsPort)
@@ -612,12 +632,7 @@ func main() {
 		defer ticker.Stop()
 
 		// Run initial checks immediately
-		for _, urlWithGroup := range urlsWithGroups {
-			job := CheckJob{
-				URL:      urlWithGroup.URL,
-				Protocol: search.Protocol,
-				Search:   search,
-			}
+		for _, job := range dialJobs {
 			workerPool.AddJob(job)
 		}
 
@@ -625,17 +640,12 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				// Add jobs for all URLs
-				for _, urlWithGroup := range urlsWithGroups {
-					job := CheckJob{
-						URL:      urlWithGroup.URL,
-						Protocol: search.Protocol,
-						Search:   search,
-					}
+				for _, job := range dialJobs {
 					workerPool.AddJob(job)
 				}
 			case <-sigChan:
 				log.Println("Received shutdown signal, stopping exporter...")
+				close(stopPingers)
 				workerPool.Stop()
 				return
 			}
@@ -691,6 +701,9 @@ func parseURLList(s string) []string {
 // Every check goes through here: a connection that is never closed leaks a
 // socket and file descriptor per check and leaves a connection open on the target.
 func probe(protocol, addr string, timeout time.Duration) error {
+	if protocol == "icmp" {
+		return pingOnce(addr, timeout)
+	}
 	conn, err := net.DialTimeout(protocol, addr, timeout)
 	if err != nil {
 		return err
@@ -699,13 +712,13 @@ func probe(protocol, addr string, timeout time.Duration) error {
 }
 
 // retryWithExponentialBackoff performs a connection attempt with retry logic
-func (search *Search) retryWithExponentialBackoff(addr string) (time.Duration, error) {
+func (search *Search) retryWithExponentialBackoff(protocol, addr string) (time.Duration, error) {
 	var lastErr error
 	startTime := time.Now()
 
 	for attempt := 0; attempt <= search.RetryCount; attempt++ {
 		// Attempt the connection
-		err := probe(search.Protocol, addr, search.Timeout)
+		err := probe(protocol, addr, search.Timeout)
 
 		if err == nil {
 			// Success - return the total time taken
@@ -732,7 +745,7 @@ func (search *Search) retryWithExponentialBackoff(addr string) (time.Duration, e
 				attempt+1, search.RetryCount, addr, delay, err)
 
 			// Record retry attempt metric
-			metrics.RecordRetryAttempt(search.SearchResult.Address, search.Protocol)
+			metrics.RecordRetryAttempt(search.SearchResult.Address, protocol)
 
 			time.Sleep(delay)
 		}
@@ -746,9 +759,13 @@ func (search *Search) retryWithExponentialBackoff(addr string) (time.Duration, e
 func (search *Search) Check(url string, exporterState *ExporterState) string {
 	startTime := time.Now()
 
+	protocol, url := splitScheme(url, search.Protocol)
 	var port_from_url []string = strings.Split(url, ":")
 
-	if len(port_from_url) != 1 {
+	if protocol == "icmp" {
+		search.SearchResult.Address = port_from_url[0]
+		search.SearchResult.Port = ""
+	} else if len(port_from_url) != 1 {
 		search.SearchResult.Address = port_from_url[0]
 		search.SearchResult.Port = port_from_url[1]
 	} else {
@@ -756,14 +773,17 @@ func (search *Search) Check(url string, exporterState *ExporterState) string {
 		search.SearchResult.Port = search.Port
 	}
 
-	addr := search.SearchResult.Address + ":" + search.SearchResult.Port
+	addr := search.SearchResult.Address
+	if search.SearchResult.Port != "" {
+		addr += ":" + search.SearchResult.Port
+	}
 
 	// Check circuit breaker if available
 	var circuitBreaker *CircuitBreaker
 	if exporterState != nil {
 		circuitBreaker = exporterState.GetOrCreateCircuitBreaker(
 			search.SearchResult.Address,
-			search.Protocol,
+			protocol,
 			search.CircuitThreshold,
 			search.CircuitTimeout,
 		)
@@ -776,10 +796,10 @@ func (search *Search) Check(url string, exporterState *ExporterState) string {
 			search.SearchResult.State = "CircuitOpen"
 
 			// Record metrics for circuit open
-			metrics.RecordCheck(addr, search.Protocol, false, responseTimeSeconds)
-			metrics.RecordCheckDuration(addr, search.Protocol, responseTimeSeconds)
+			metrics.RecordCheck(addr, protocol, false, responseTimeSeconds)
+			metrics.RecordCheckDuration(addr, protocol, responseTimeSeconds)
 
-			return fmt.Sprintf("🚫 [Circuit Open] [%v]  %v (%.3fs)", search.Protocol, addr, responseTimeSeconds)
+			return fmt.Sprintf("🚫 [Circuit Open] [%v]  %v (%.3fs)", protocol, addr, responseTimeSeconds)
 		}
 	}
 
@@ -788,10 +808,10 @@ func (search *Search) Check(url string, exporterState *ExporterState) string {
 	var responseTime time.Duration
 
 	if search.RetryCount > 0 {
-		responseTime, err = search.retryWithExponentialBackoff(addr)
+		responseTime, err = search.retryWithExponentialBackoff(protocol, addr)
 	} else {
 		// Original behavior without retries
-		err = probe(search.Protocol, addr, search.Timeout)
+		err = probe(protocol, addr, search.Timeout)
 		responseTime = time.Since(startTime)
 	}
 
@@ -815,29 +835,29 @@ func (search *Search) Check(url string, exporterState *ExporterState) string {
 		newFailureCount := circuitBreaker.GetFailureCount()
 
 		// Record current state
-		metrics.RecordCircuitBreakerState(search.SearchResult.Address, search.Protocol, int(newState))
+		metrics.RecordCircuitBreakerState(search.SearchResult.Address, protocol, int(newState))
 
 		// Record failure count
-		metrics.RecordCircuitBreakerFailureCount(search.SearchResult.Address, search.Protocol, newFailureCount)
+		metrics.RecordCircuitBreakerFailureCount(search.SearchResult.Address, protocol, newFailureCount)
 
 		// Record state transitions
 		if oldState != newState {
 			transition := fmt.Sprintf("%s_to_%s", oldState.String(), newState.String())
-			metrics.RecordCircuitBreakerTransition(search.SearchResult.Address, search.Protocol, transition)
+			metrics.RecordCircuitBreakerTransition(search.SearchResult.Address, protocol, transition)
 		}
 	}
 
 	if err != nil {
 		search.SearchResult.State = "Failed"
 		// Record metrics for failed check
-		metrics.RecordCheck(addr, search.Protocol, false, responseTimeSeconds)
-		metrics.RecordCheckDuration(addr, search.Protocol, responseTimeSeconds)
-		return fmt.Sprintf("😿 [-] [%v]  %v (%.3fs)", search.Protocol, addr, responseTimeSeconds)
+		metrics.RecordCheck(addr, protocol, false, responseTimeSeconds)
+		metrics.RecordCheckDuration(addr, protocol, responseTimeSeconds)
+		return fmt.Sprintf("😿 [-] [%v]  %v (%.3fs)", protocol, addr, responseTimeSeconds)
 	} else {
 		search.SearchResult.State = "Success"
 		// Record metrics for successful check
-		metrics.RecordCheck(addr, search.Protocol, true, responseTimeSeconds)
-		metrics.RecordCheckDuration(addr, search.Protocol, responseTimeSeconds)
+		metrics.RecordCheck(addr, protocol, true, responseTimeSeconds)
+		metrics.RecordCheckDuration(addr, protocol, responseTimeSeconds)
 
 		// Determine status based on response time thresholds
 		var status string
@@ -849,7 +869,7 @@ func (search *Search) Check(url string, exporterState *ExporterState) string {
 			status = "🟢" // Green for normal
 		}
 
-		return fmt.Sprintf("%s [+] [%v]  %v (%.3fs)", status, search.Protocol, addr, responseTimeSeconds)
+		return fmt.Sprintf("%s [+] [%v]  %v (%.3fs)", status, protocol, addr, responseTimeSeconds)
 	}
 }
 

@@ -1,205 +1,266 @@
 # urlchecker
 
-A powerful CLI tool for health-checking URLs with Prometheus metrics support and continuous monitoring capabilities.
+urlchecker checks whether hosts answer over TCP, UDP or ICMP (ping). It works as a one-shot CLI and as a Prometheus exporter. In exporter mode it pings ICMP targets continuously and exports the same counters as [smokeping_prober](https://github.com/SuperQ/smokeping_prober), so you can alert on packet loss.
 
-## Features
+Contents:
 
-- **Basic URL Health Checks**: Check single or multiple URLs with custom ports and protocols
-- **File-based URL Lists**: Import URLs from text files for batch processing
-- **JSON Output**: Get structured JSON responses for integration
-- **Prometheus Metrics**: Basic metrics mode with continuous monitoring
-- **Advanced Exporter Mode**: Production-ready exporter with worker pools and thread-safe state management
-- **Docker Support**: Run as a containerized application
+- [Quick start](#quick-start): a first check and a first exporter.
+- [How-to guides](#how-to-guides): recipes for common jobs.
+- [Reference](#reference): targets, flags, config file and metrics.
+- [Explanation](#explanation): how the checks work and what they do not tell you.
 
-## Getting Started
+## Quick start
 
-### Prerequisites
+You need Go 1.23 or later, or Docker.
 
-This project requires Go to be installed. On OS X with Homebrew you can just run `brew install go`.
+1. Build the binary:
 
-### Building
+   ```console
+   make build
+   ```
 
-```console
-make build
-cd ./bin/
-```
+2. Check one host. The default protocol is TCP and the default port is 80:
 
-### Basic Usage
+   ```console
+   $ ./bin/urlchecker --url example.com
+   🟢 [+] [tcp]  example.com:80 (0.031s)
+   ```
 
-#### Single URL Check
+   `[+]` means the connection was accepted. `[-]` means it failed. The colour shows the response time against `--warn-threshold` and `--crit-threshold`.
 
-```console
-./urlchecker --url extim.su
-```
+3. Run the exporter for a TCP port and a ping target:
 
-#### Multiple URLs
+   ```console
+   sudo ./bin/urlchecker --exporter --url example.com:443,icmp://1.1.1.1
+   ```
 
-```console
-./urlchecker --url extim.su,google.com:80,example.com:443
-```
+4. Open <http://localhost:9090/metrics>. You will see `urlchecker_current_status` for `example.com:443` and `urlchecker_icmp_requests_total` for `1.1.1.1`.
 
-#### Custom Protocol (TCP/UDP)
+`sudo` lets the exporter open a raw ICMP socket. To run without root, see [Run ICMP without root](#run-icmp-without-root).
 
-```console
-./urlchecker --url google.com:53 --protocol udp
-```
+## How-to guides
 
-#### File-based URL Lists with JSON Output
+### Check several hosts at once
+
+Separate targets with commas. A target without a port uses `--port`:
 
 ```console
-./urlchecker --file url.txt --json
+./urlchecker --url example.com,example.org:443 --port 8080 --timeout 3s
 ```
 
-### Prometheus Metrics Mode
-
-#### Basic Metrics Mode
-
-Enable continuous monitoring with Prometheus metrics:
+Or put one target per line in a file:
 
 ```console
-./urlchecker --metrics --url google.com,github.com --check-interval 30s
+./urlchecker --file urls.txt
 ```
 
-This will:
-
-- Start a Prometheus metrics server on port 9090 (default)
-- Continuously monitor the specified URLs
-- Expose metrics at `http://localhost:9090/metrics`
-
-#### Advanced Exporter Mode (Recommended)
-
-For production environments, use the exporter mode with worker pools:
+### Get JSON output for scripts
 
 ```console
-./urlchecker --exporter --url google.com,github.com --workers 5 --check-interval 30s
+./urlchecker --file urls.txt --json
 ```
 
-Exporter mode includes:
+You get one JSON object per target, then a summary with group health.
 
-- **Worker Pool**: Configurable number of concurrent workers
-- **Thread-safe State Management**: Comprehensive URL state tracking
-- **Enhanced Logging**: Detailed worker activity and response times
-- **Prometheus Metrics**: Automatically included (no separate flag needed)
-- **Graceful Shutdown**: Proper signal handling and resource cleanup
-
-#### Exporter Mode Options
+### Check a UDP port
 
 ```console
-# Custom worker count and monitoring interval
-./urlchecker --exporter --url google.com,github.com --workers 3 --check-interval 10s
-
-# Custom metrics port
-./urlchecker --exporter --url google.com --workers 2 --metrics-port 8080
-
-# Monitor URLs from file
-./urlchecker --exporter --file urls.txt --workers 4 --check-interval 60s
+./urlchecker --url udp://10.0.0.53:53
 ```
 
-### Using Docker
+Or set `--protocol udp` for every target without a prefix. A UDP check sends no data, so read [What a UDP check proves](#what-a-udp-check-proves) first.
 
-#### Basic URL Check
+### Measure packet loss to hosts
+
+1. List the hosts as `icmp://` targets. You can mix them with TCP targets:
+
+   ```text
+   # targets.txt
+   icmp://10.0.50.101
+   icmp://10.0.50.102
+   10.0.50.101:10250
+   10.0.50.102:10250
+   ```
+
+2. Start the exporter:
+
+   ```console
+   urlchecker --exporter --file targets.txt --metrics-port 9375 --ping-interval 1s --timeout 2s
+   ```
+
+3. In Prometheus, compute the loss per target over 5 minutes:
+
+   ```promql
+   1 - (
+     rate(urlchecker_icmp_response_duration_seconds_count[5m])
+       / rate(urlchecker_icmp_requests_total[5m])
+   )
+   ```
+
+   `0` means no loss and `1` means every ping was lost. A target that never replies still shows `1`, because its reply series is created at `0` when the pinger starts.
+
+4. For the average round-trip time, divide `rate(urlchecker_icmp_response_duration_seconds_sum[5m])` by the `_count` rate. For percentiles, use `histogram_quantile` on the `_bucket` series.
+
+### Run ICMP without root
+
+urlchecker tries a raw ICMP socket first, then the unprivileged ping socket. Use one of these:
+
+- **Linux, unprivileged socket.** The process group ID must be inside `net.ipv4.ping_group_range`. Docker sets this to `0 2147483647` by default, so the image's `nonroot` user can ping.
+- **Raw socket without full root.** Give the process `CAP_NET_RAW`.
+
+In Kubernetes, many nodes set `ping_group_range` to `1 0`, which disables the unprivileged socket. Then run as UID 0 with only `NET_RAW`:
+
+```yaml
+securityContext:
+  runAsUser: 0
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+    add: [NET_RAW]
+```
+
+If neither socket can be opened, urlchecker logs `open ICMP socket: raw: ...; unprivileged: ...` and tries again on every interval.
+
+### Run the exporter in Docker or Kubernetes
 
 ```console
-docker run --rm docker.io/extim/urlchecker --url extim.su
+docker run -d --name urlchecker -p 9090:9090 \
+  docker.io/extim/urlchecker:0.2.0 \
+  --exporter --url example.com:443,icmp://1.1.1.1 --workers 3 --check-interval 30s
 ```
 
-#### Multiple URLs with Custom Ports
+To probe between Kubernetes nodes, run it as a DaemonSet with `hostNetwork: true`. Mount the target file from a ConfigMap and scrape port `--metrics-port`. Each pod then measures from its own node to every target. The pod IP is the node IP, so you can drop the self-pair at scrape time.
+
+### Use a config file
 
 ```console
-docker run --rm docker.io/extim/urlchecker --url extim.su,google.com:80,example.com:443
+./urlchecker --config example-config.yaml
 ```
 
-#### Custom Default Port
+[`example-config.yaml`](example-config.yaml) lists every key. See [Config file](#config-file) for how it combines with flags.
 
-```console
-docker run --rm docker.io/extim/urlchecker --url extim.su,google.com:80,example.com --port 443
-```
+## Reference
 
-#### UDP Protocol with JSON Output
+### Targets
 
-```console
-docker run --rm docker.io/extim/urlchecker --url google.com:53 --protocol udp --json
-```
+| Form | Protocol | Example |
+|------|----------|---------|
+| `host` | `--protocol`, port `--port` | `example.com` |
+| `host:port` | `--protocol` | `example.com:443` |
+| `tcp://host:port` | TCP | `tcp://10.0.0.1:22` |
+| `udp://host:port` | UDP | `udp://10.0.0.53:53` |
+| `icmp://host` | ICMP echo (IPv4) | `icmp://10.0.0.1` |
 
-#### File-based URL Lists
+The prefix wins over `--protocol`, so one run can mix protocols. Targets come from `--url` (comma-separated), from `--file`, or from `urls` and `groups` in the config file.
 
-```console
-docker run --rm -v ./urls.txt:/opt/urlchecker/bin/url.txt docker.io/extim/urlchecker --file url.txt
-```
+The target file has one target per line. It also accepts:
 
-#### Exporter Mode with Docker
+- Lines starting with `#`, which are comments.
+- Empty lines.
+- `[group:<name>]` headers, which put the targets below them into a group.
 
-```console
-# Expose metrics port for Prometheus scraping
-docker run --rm -p 9090:9090 docker.io/extim/urlchecker --exporter --url google.com,github.com --workers 3
+`--group` puts every target from the file into one group.
 
-# Custom metrics port
-docker run --rm -p 8080:8080 docker.io/extim/urlchecker --exporter --url google.com --metrics-port 8080
-```
+### Modes
 
-## Available Metrics
+| Mode | Flag | Behaviour |
+|------|------|-----------|
+| One-shot | none | Checks every target once, prints the results and exits. ICMP sends one echo request. |
+| Metrics | `--metrics` | Repeats the one-shot check every `--check-interval` and serves metrics. ICMP sends one echo per interval and sets `urlchecker_current_status`. |
+| Exporter | `--exporter` | A pool of `--workers` checks the TCP and UDP targets every `--check-interval`. Each ICMP target gets its own pinger, which sends one echo every `--ping-interval` and exports the `urlchecker_icmp_*` metrics. |
 
-When running in metrics or exporter mode, the following Prometheus metrics are available at `/metrics`:
+### Flags
 
-- `urlchecker_total_checks`: Total number of URL health checks performed
-- `urlchecker_failed_checks`: Number of failed URL checks
-- `urlchecker_response_time_seconds`: Response time histogram
-- `urlchecker_check_duration_seconds`: Check duration histogram
-- `urlchecker_current_status`: Current status gauge (1 = up, 0 = down)
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | | Targets, comma-separated |
+| `--file` | | File with one target per line |
+| `--config` | | YAML or JSON config file |
+| `--port` | `80` | Port for targets without one |
+| `--protocol` | `tcp` | Protocol for targets without a prefix: `tcp`, `udp` or `icmp` |
+| `--timeout` | `5s` | Connect timeout, or wait for an echo reply. In exporter mode the ping timeout is capped at `--ping-interval`. |
+| `--json` | `false` | JSON output |
+| `--metrics` | `false` | Metrics mode |
+| `--exporter` | `false` | Exporter mode |
+| `--metrics-port` | `9090` | Port for `/metrics` |
+| `--check-interval` | `30s` | Interval for TCP and UDP checks, and for ICMP in metrics mode |
+| `--ping-interval` | `1s` | Interval between echo requests per ICMP target in exporter mode |
+| `--workers` | `5` | Worker count for exporter mode |
+| `--group` | | Group name for all targets |
+| `--warn-threshold` | `500ms` | Response time shown as 🟡 |
+| `--crit-threshold` | `1s` | Response time shown as 🔴 |
+| `--retry-count` | `3` | Retries after a failed check (one-shot and metrics modes) |
+| `--retry-delay` | `1s` | First retry delay, doubled each retry |
+| `--circuit-threshold` | `5` | Failures before the circuit breaker opens |
+| `--circuit-timeout` | `60s` | Time before an open circuit breaker is tried again |
+| `--version` | `false` | Print the version |
 
-All metrics include labels for `url` and `protocol` for detailed monitoring.
+### Config file
 
-## Command Line Options
+The config keys match the flags in snake_case: `urls`, `file`, `port`, `protocol`, `timeout`, `json_output`, `metrics`, `metrics_port`, `exporter`, `check_interval`, `workers`, `ping_interval`, `group_name`, `groups`, `warning_threshold`, `critical_threshold`, `retry_count`, `retry_delay`, `circuit_breaker_threshold` and `circuit_breaker_timeout`.
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--url` | URL(s) to check (comma-separated) | - |
-| `--file` | File containing URLs (one per line) | - |
-| `--port` | Default port for URLs | 80 |
-| `--protocol` | Protocol to use (tcp/udp) | tcp |
-| `--timeout` | Connection timeout | 5s |
-| `--json` | Output results in JSON format | false |
-| `--metrics` | Enable basic Prometheus metrics mode | false |
-| `--exporter` | Enable advanced exporter mode (includes metrics) | false |
-| `--workers` | Number of worker goroutines (exporter mode) | 5 |
-| `--metrics-port` | Port for Prometheus metrics endpoint | 9090 |
-| `--check-interval` | Interval between health checks | 30s |
-| `--version` | Show version information | false |
+Flags win over the file. Known limitation: a flag's default value also wins over the file. Set a value as a flag if the file's value is ignored. File values work for `urls`, `groups` and the boolean switches.
 
-## Examples
+### Metrics
 
-### Development and Testing
+TCP and UDP checks, and ICMP in one-shot and metrics modes, use the labels `url` and `protocol`:
 
-```console
-# Quick single URL check
-./urlchecker --url google.com
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `urlchecker_current_status` | gauge | `1` if the last check passed, else `0` |
+| `urlchecker_total_checks` | counter | Checks run |
+| `urlchecker_failed_checks` | counter | Checks failed |
+| `urlchecker_response_time_seconds` | histogram | Check response time |
+| `urlchecker_check_duration_seconds` | histogram | Check duration including retries |
+| `urlchecker_retry_attempts_total` | counter | Retries |
+| `urlchecker_circuit_breaker_state` | gauge | `0` closed, `1` half-open, `2` open |
+| `urlchecker_circuit_breaker_failure_count` | gauge | Consecutive failures |
+| `urlchecker_circuit_breaker_transitions_total` | counter | State changes, with label `transition` |
 
-# Multiple URLs with custom timeout
-./urlchecker --url google.com,github.com,example.com --timeout 3s
+Group metrics use the label `group`:
 
-# JSON output for scripting
-./urlchecker --url google.com --json
-```
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `urlchecker_group_health` | gauge | `1` if every target in the group passed |
+| `urlchecker_group_total_urls` | gauge | Targets in the group |
+| `urlchecker_group_healthy_urls` | gauge | Targets that passed |
 
-### Production Monitoring
+ICMP in exporter mode uses the labels `host` (as written in the target) and `ip` (the resolved address):
 
-```console
-# Basic metrics mode
-./urlchecker --metrics --url google.com,github.com --check-interval 60s
+| Metric | Type | smokeping_prober equivalent |
+|--------|------|-----------------------------|
+| `urlchecker_icmp_requests_total` | counter | `smokeping_requests_total` |
+| `urlchecker_icmp_response_duration_seconds` | histogram, buckets 50µs × 2ⁿ up to ~26s | `smokeping_response_duration_seconds` |
 
-# Advanced exporter mode (recommended)
-./urlchecker --exporter --url google.com,github.com,example.com --workers 5 --check-interval 30s
-```
+## Explanation
 
-### Containerized Deployment
+### How a check works
 
-```console
-# Run exporter mode in Docker with port exposure
-docker run -d --name urlchecker \
-  -p 9090:9090 \
-  docker.io/extim/urlchecker \
-  --exporter \
-  --url google.com,github.com,example.com \
-  --workers 3 \
-  --check-interval 30s
-```
+A TCP check opens a connection and closes it right away. It passes when the handshake completes within `--timeout`, so it proves something is listening. It does not check what the service returns.
+
+An ICMP check sends one echo request and waits for the reply that matches its ID and sequence number. It proves the host's network stack answers, not that any service is running.
+
+### Why ICMP has its own loop
+
+Packet loss of a few percent is invisible to a check that runs every 30 seconds. One lost packet out of two is a coin toss, and a TCP retransmit hides most of it anyway. To see 1% loss you need many samples, so the exporter pings each ICMP target every `--ping-interval`, one second by default. It counts every request and every reply. This is how smokeping_prober works, and the metric layout is the same, so existing loss queries need only the metric names changed.
+
+The pinger waits for one reply before sending the next request. A reply that comes after the timeout counts as lost.
+
+### Raw and unprivileged ICMP sockets
+
+A raw ICMP socket needs `CAP_NET_RAW`, and it receives a copy of every ICMP packet that reaches the host. Each pinger has its own socket and filters by ID, sequence number and source address.
+
+The unprivileged ping socket (Linux `SOCK_DGRAM`) needs no capability, but `net.ipv4.ping_group_range` must cover the process group. On Linux the kernel sets the echo ID and delivers only the matching replies.
+
+urlchecker tries the raw socket first, so it works in both setups without a flag.
+
+### What a UDP check proves
+
+UDP has no handshake, and urlchecker sends no payload. A UDP check passes as soon as the name resolves and a route exists, even if nothing listens on the port. Use it to catch DNS and routing failures only, and use ICMP or TCP to test reachability.
+
+### Limits
+
+- ICMP is IPv4 only.
+- There is one socket per ICMP target. That's fine for tens of targets. A shared socket would scale better to hundreds.
+- Exporter mode does not retry TCP or UDP checks and has no circuit breaker. Each interval is a single attempt.

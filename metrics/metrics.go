@@ -115,6 +115,26 @@ var (
 		},
 		[]string{"url", "protocol"},
 	)
+
+	// ICMPRequests counts echo requests sent to icmp:// targets (smokeping_requests_total).
+	ICMPRequests = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "urlchecker_icmp_requests_total",
+			Help: "ICMP echo requests sent",
+		},
+		[]string{"host", "ip"},
+	)
+
+	// ICMPResponseDuration holds the round-trip time of every echo reply
+	// (smokeping_response_duration_seconds). Its _count is the number of replies.
+	ICMPResponseDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "urlchecker_icmp_response_duration_seconds",
+			Help:    "ICMP echo round-trip time in seconds",
+			Buckets: prometheus.ExponentialBuckets(0.00005, 2, 20), // 50µs to ~26s, as smokeping_prober
+		},
+		[]string{"host", "ip"},
+	)
 )
 
 // RecordCheck records metrics for a URL health check
@@ -193,4 +213,6 @@ func ResetMetrics() {
 	CircuitBreakerStateGauge.Reset()
 	CircuitBreakerTransitionsCounter.Reset()
 	CircuitBreakerFailureCountGauge.Reset()
+	ICMPRequests.Reset()
+	ICMPResponseDuration.Reset()
 }

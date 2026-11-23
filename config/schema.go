@@ -22,6 +22,7 @@ type Config struct {
 	Exporter      bool   `yaml:"exporter,omitempty" json:"exporter,omitempty"`             // Enable exporter mode
 	CheckInterval string `yaml:"check_interval,omitempty" json:"check_interval,omitempty"` // Interval between checks (default: "30s")
 	Workers       int    `yaml:"workers,omitempty" json:"workers,omitempty"`               // Number of worker goroutines (default: 5)
+	PingInterval  string `yaml:"ping_interval,omitempty" json:"ping_interval,omitempty"`   // Interval between echo requests to icmp:// targets (default: "1s")
 
 	// Group configuration
 	GroupName string                 `yaml:"group_name,omitempty" json:"group_name,omitempty"` // Default group name for URLs
@@ -65,7 +66,8 @@ func DefaultConfig() *Config {
 		Exporter:                false,
 		CheckInterval:           "30s",
 		Workers:                 5,
-		WarningThreshold:        "500ms",
+		PingInterval:            "1s",
+		WarningThreshold:       "500ms",
 		CriticalThreshold:       "1s",
 		RetryCount:              3,
 		RetryDelay:              "1s",
@@ -120,6 +122,9 @@ func (c *Config) Merge(override *Config) {
 	}
 	if override.Workers != 0 {
 		c.Workers = override.Workers
+	}
+	if override.PingInterval != "" {
+		c.PingInterval = override.PingInterval
 	}
 
 	// Merge group configuration
