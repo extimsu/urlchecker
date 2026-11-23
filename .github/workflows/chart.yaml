@@ -98,7 +98,9 @@ jobs:
           REGISTRY: ghcr.io/${{ github.repository_owner }}/charts
         run: |
           helm package "$CHART" -d dist
+          # helm and cosign keep separate credentials.
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | cosign login ghcr.io -u "${{ github.actor }}" --password-stdin
           out=$(helm push dist/*.tgz "oci://$REGISTRY" 2>&1); echo "$out"
           digest=$(echo "$out" | awk '/^Digest:/ {print $2}')
           cosign sign --yes "$REGISTRY/urlchecker@$digest"
