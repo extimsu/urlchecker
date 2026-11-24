@@ -4,3 +4,5 @@ targets:
   - icmp://127.0.0.1
 checks:
   interval: 5s
+grafanaDashboard:
+  enabled: true

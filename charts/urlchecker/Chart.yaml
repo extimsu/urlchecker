@@ -5,7 +5,7 @@ description: >-
   Deployment for endpoint checks or as a host-network DaemonSet for
   node-to-node packet loss.
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.2.0"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/extimsu/urlchecker
@@ -24,6 +24,9 @@ maintainers:
     url: https://github.com/extimsu
 annotations:
   artifacthub.io/license: MIT
+  artifacthub.io/changes: |
+    - kind: added
+      description: Grafana dashboard, shipped as a sidecar ConfigMap with grafanaDashboard.enabled
   artifacthub.io/images: |
     - name: urlchecker
       image: docker.io/extim/urlchecker:0.2.0

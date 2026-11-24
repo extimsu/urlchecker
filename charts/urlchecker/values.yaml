@@ -109,6 +109,21 @@ serviceMonitor:
   # -- Relabelings applied to scraped samples.
   metricRelabelings: []
 
+grafanaDashboard:
+  # -- Ship the Grafana dashboard (`dashboards/urlchecker.json`) as a ConfigMap
+  # for the Grafana sidecar (grafana and kube-prometheus-stack charts) to load.
+  enabled: false
+  # -- Namespace for the ConfigMap. Defaults to the release namespace; set it if
+  # the sidecar watches only its own namespace.
+  namespace: ""
+  # -- Labels the sidecar selects on. The grafana chart's default is
+  # `grafana_dashboard: "1"`.
+  labels:
+    grafana_dashboard: "1"
+  # -- Annotations, e.g. `grafana_folder: Monitoring` with the sidecar's
+  # `folderAnnotation` set.
+  annotations: {}
+
 serviceAccount:
   # -- Create a ServiceAccount.
   create: true

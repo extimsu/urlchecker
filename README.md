@@ -175,6 +175,30 @@ The chart lives in [`charts/urlchecker`](charts/urlchecker) and is published to
 The [chart README](charts/urlchecker/README.md) lists every value. It also
 covers ICMP privileges in each mode and Pod Security levels.
 
+### Graph the metrics in Grafana
+
+The dashboard [`charts/urlchecker/dashboards/urlchecker.json`](charts/urlchecker/dashboards/urlchecker.json)
+covers the exporter's metrics:
+
+- target status and p95 response time;
+- status over time and failed checks;
+- ICMP loss, round trip and a smokeping-style round-trip heatmap;
+- a loss matrix of instance × ICMP target.
+
+It needs Grafana 10 or later and a Prometheus-compatible data source.
+
+- **Import it by hand.** In Grafana, open **Dashboards → New → Import**, upload
+  the file, and pick your data source.
+- **Ship it with the Helm chart.** Set `grafanaDashboard.enabled=true`. The chart
+  creates a ConfigMap labelled `grafana_dashboard: "1"`, which the Grafana
+  sidecar of the grafana and kube-prometheus-stack charts loads. If the sidecar
+  watches only its own namespace, set `grafanaDashboard.namespace` to that
+  namespace.
+
+Use the filters to pick the data source, job, instance and targets. The
+dashboard has no panels for retries, circuit breakers or groups, because the
+exporter does not emit those metrics. The one-shot and metrics modes do.
+
 ### Use a config file
 
 ```console

@@ -94,6 +94,31 @@ To alert per bad node rather than per pair, count how many of a node's peers
 see loss, and fire when it is half or more. A single bad path then doesn't
 page, and a bad node does.
 
+## Grafana dashboard
+
+```yaml
+grafanaDashboard:
+  enabled: true
+  annotations:
+    grafana_folder: Monitoring   # with the sidecar's folderAnnotation set
+```
+
+This ships [`dashboards/urlchecker.json`](dashboards/urlchecker.json) as a
+ConfigMap labelled `grafana_dashboard: "1"`. The Grafana sidecar of the grafana
+and kube-prometheus-stack charts loads ConfigMaps with that label. If the
+sidecar watches only its own namespace, set `grafanaDashboard.namespace` to that
+namespace. Without the sidecar, import the JSON file in Grafana under
+**Dashboards → New → Import**.
+
+The dashboard shows:
+
+- target status and p95 response time;
+- ICMP loss and round trip;
+- a smokeping-style round-trip heatmap;
+- a loss matrix of instance × target.
+
+In DaemonSet mode, each instance is one node.
+
 ## Targets from your own ConfigMap
 
 ```yaml
