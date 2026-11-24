@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,7 +22,8 @@ func LoadConfig(filePath string) (*Config, error) {
 	// Auto-detect format based on file extension
 	format := detectFormat(filePath, data)
 
-	var config Config
+	// Keys the file leaves out keep their defaults.
+	config := *DefaultConfig()
 
 	switch format {
 	case "yaml":
@@ -107,62 +109,41 @@ func detectFormat(filePath string, data []byte) string {
 	return "yaml"
 }
 
-// validateConfig performs basic validation on the loaded configuration
+// validateConfig checks the values a typo would break.
 func validateConfig(config *Config) error {
-	// Check for required fields or logical constraints
-	if config.Timeout != "" {
-		// Validate timeout format (basic check)
-		if !strings.Contains(config.Timeout, "s") && !strings.Contains(config.Timeout, "ms") {
-			return fmt.Errorf("invalid timeout format: %s (use format like '5s' or '500ms')", config.Timeout)
+	for key, v := range map[string]string{
+		"timeout":            config.Timeout,
+		"warning_threshold":  config.WarningThreshold,
+		"critical_threshold": config.CriticalThreshold,
+		"retry_delay":        config.RetryDelay,
+		"check_interval":     config.CheckInterval,
+		"ping_interval":      config.PingInterval,
+	} {
+		if v == "" {
+			continue
+		}
+		if d, err := time.ParseDuration(v); err != nil || d < 0 {
+			return fmt.Errorf("invalid %s %q (use a duration like 500ms, 5s or 1m)", key, v)
 		}
 	}
-
-	if config.WarningThreshold != "" {
-		if !strings.Contains(config.WarningThreshold, "s") && !strings.Contains(config.WarningThreshold, "ms") {
-			return fmt.Errorf("invalid warning threshold format: %s (use format like '500ms' or '1s')", config.WarningThreshold)
-		}
-	}
-
-	if config.CriticalThreshold != "" {
-		if !strings.Contains(config.CriticalThreshold, "s") && !strings.Contains(config.CriticalThreshold, "ms") {
-			return fmt.Errorf("invalid critical threshold format: %s (use format like '1s' or '2s')", config.CriticalThreshold)
-		}
-	}
-
-	if config.RetryDelay != "" {
-		if !strings.Contains(config.RetryDelay, "s") && !strings.Contains(config.RetryDelay, "ms") {
-			return fmt.Errorf("invalid retry delay format: %s (use format like '1s' or '500ms')", config.RetryDelay)
-		}
-	}
-
-	if config.CircuitBreakerTimeout != "" {
-		if !strings.Contains(config.CircuitBreakerTimeout, "s") && !strings.Contains(config.CircuitBreakerTimeout, "ms") {
-			return fmt.Errorf("invalid circuit breaker timeout format: %s (use format like '60s' or '1m')", config.CircuitBreakerTimeout)
-		}
-	}
-
-	if config.CheckInterval != "" {
-		if !strings.Contains(config.CheckInterval, "s") && !strings.Contains(config.CheckInterval, "ms") {
-			return fmt.Errorf("invalid check interval format: %s (use format like '30s' or '1m')", config.CheckInterval)
-		}
-	}
-
-	// Validate numeric ranges
 	if config.MetricsPort < 1 || config.MetricsPort > 65535 {
-		return fmt.Errorf("invalid metrics port: %d (must be between 1 and 65535)", config.MetricsPort)
+		return fmt.Errorf("invalid metrics_port %d (must be between 1 and 65535)", config.MetricsPort)
 	}
-
 	if config.Workers < 1 || config.Workers > 100 {
-		return fmt.Errorf("invalid worker count: %d (must be between 1 and 100)", config.Workers)
+		return fmt.Errorf("invalid workers %d (must be between 1 and 100)", config.Workers)
 	}
-
 	if config.RetryCount < 0 || config.RetryCount > 10 {
-		return fmt.Errorf("invalid retry count: %d (must be between 0 and 10)", config.RetryCount)
+		return fmt.Errorf("invalid retry_count %d (must be between 0 and 10)", config.RetryCount)
 	}
-
-	if config.CircuitBreakerThreshold < 1 || config.CircuitBreakerThreshold > 100 {
-		return fmt.Errorf("invalid circuit breaker threshold: %d (must be between 1 and 100)", config.CircuitBreakerThreshold)
+	switch config.LogLevel {
+	case "", "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("invalid log_level %q (want debug, info, warn or error)", config.LogLevel)
 	}
-
+	switch config.LogFormat {
+	case "", "text", "json":
+	default:
+		return fmt.Errorf("invalid log_format %q (want text or json)", config.LogFormat)
+	}
 	return nil
 }

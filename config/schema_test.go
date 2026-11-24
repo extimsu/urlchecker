@@ -35,11 +35,8 @@ func TestDefaultConfig(t *testing.T) {
 	if config.RetryDelay != "1s" {
 		t.Errorf("Expected default retry delay to be '1s', got '%s'", config.RetryDelay)
 	}
-	if config.CircuitBreakerThreshold != 5 {
-		t.Errorf("Expected default circuit breaker threshold to be 5, got %d", config.CircuitBreakerThreshold)
-	}
-	if config.CircuitBreakerTimeout != "60s" {
-		t.Errorf("Expected default circuit breaker timeout to be '60s', got '%s'", config.CircuitBreakerTimeout)
+	if config.CircuitBreakerThreshold != 0 || config.CircuitBreakerTimeout != "" {
+		t.Error("Expected no circuit breaker defaults: the keys are deprecated")
 	}
 	if config.Groups == nil {
 		t.Error("Expected default groups to be initialized")
@@ -97,64 +94,15 @@ func TestConfigMergeWithNil(t *testing.T) {
 	}
 }
 
-func TestGetGroupConfig(t *testing.T) {
-	config := DefaultConfig()
-
-	// Add a group configuration
-	config.Groups["test-group"] = GroupConfig{
-		URLs:                    []string{"group1.com", "group2.com"},
-		WarningThreshold:        "200ms",
-		CriticalThreshold:       "500ms",
-		RetryCount:              5,
-		RetryDelay:              "2s",
-		CircuitBreakerThreshold: 3,
-		CircuitBreakerTimeout:   "30s",
+func TestDeprecatedKeys(t *testing.T) {
+	c := DefaultConfig()
+	if keys := c.DeprecatedKeys(); len(keys) != 0 {
+		t.Errorf("defaults: DeprecatedKeys() = %v, want none", keys)
 	}
-
-	// Test getting existing group
-	group := config.GetGroupConfig("test-group")
-	if len(group.URLs) != 2 {
-		t.Errorf("Expected 2 URLs in group, got %d", len(group.URLs))
-	}
-	if group.WarningThreshold != "200ms" {
-		t.Errorf("Expected warning threshold to be '200ms', got '%s'", group.WarningThreshold)
-	}
-	if group.RetryCount != 5 {
-		t.Errorf("Expected retry count to be 5, got %d", group.RetryCount)
-	}
-
-	// Test getting non-existing group (should return defaults)
-	defaultGroup := config.GetGroupConfig("non-existing")
-	if defaultGroup.WarningThreshold != config.WarningThreshold {
-		t.Errorf("Expected default warning threshold, got '%s'", defaultGroup.WarningThreshold)
-	}
-	if defaultGroup.RetryCount != config.RetryCount {
-		t.Errorf("Expected default retry count, got %d", defaultGroup.RetryCount)
-	}
-}
-
-func TestGetGroupConfigWithPartialOverrides(t *testing.T) {
-	config := DefaultConfig()
-
-	// Add a group with only some overrides
-	config.Groups["partial-group"] = GroupConfig{
-		URLs:             []string{"partial.com"},
-		WarningThreshold: "300ms",
-		// Other fields left empty to test default inheritance
-	}
-
-	group := config.GetGroupConfig("partial-group")
-
-	// Test that overridden values are used
-	if group.WarningThreshold != "300ms" {
-		t.Errorf("Expected warning threshold to be '300ms', got '%s'", group.WarningThreshold)
-	}
-
-	// Test that default values are inherited
-	if group.CriticalThreshold != config.CriticalThreshold {
-		t.Errorf("Expected critical threshold to inherit from main config, got '%s'", group.CriticalThreshold)
-	}
-	if group.RetryCount != config.RetryCount {
-		t.Errorf("Expected retry count to inherit from main config, got %d", group.RetryCount)
+	c.CircuitBreakerThreshold = 3
+	c.Groups = map[string]GroupConfig{"web": {URLs: []string{"a"}, RetryCount: 2}, "db": {URLs: []string{"b"}}}
+	keys := c.DeprecatedKeys()
+	if len(keys) != 2 || keys[0] != "circuit_breaker_threshold" || keys[1] != "groups.web overrides" {
+		t.Errorf("DeprecatedKeys() = %v, want circuit_breaker_threshold and groups.web overrides", keys)
 	}
 }

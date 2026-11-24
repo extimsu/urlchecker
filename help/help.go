@@ -1,21 +1,22 @@
+// Package help prints the short usage.
 package help
 
-import "fmt"
+import (
+	"fmt"
+	"io"
+)
 
-// ShowHelp - showing short help
-func Show() {
-	fmt.Println(`
-	_____________
-	< URL-checker >
-	 -------------
-	`)
-	fmt.Println("Usage: urlchecker --url <url>")
-	fmt.Println("")
-	fmt.Println("urlchecker --url <url> --port <port>")
-	fmt.Println("urlchecker --file <filename>")
-	fmt.Println("urlchecker --metrics --metrics-port <port> --check-interval <duration>")
-	fmt.Println("urlchecker --exporter --workers <count> --check-interval <duration> (includes metrics)")
-	fmt.Println("urlchecker --exporter --url icmp://<host> --ping-interval <duration> (ICMP packet loss)")
-	fmt.Println("")
-	fmt.Println("For more information try --help")
+// Show prints the short usage to w.
+func Show(w io.Writer) {
+	_, _ = fmt.Fprint(w, `urlchecker checks TCP, UDP and ICMP reachability.
+
+Usage:
+  urlchecker --url example.com:443[,icmp://10.0.0.1]   check once, exit 1 if a target is down
+  urlchecker --file targets.txt                         one target per line
+  urlchecker --metrics --check-interval 30s             check repeatedly and serve /metrics
+  urlchecker --exporter --file targets.txt              Prometheus exporter; ICMP every --ping-interval
+  urlchecker --config urlchecker.yaml                   YAML or JSON config; flags override it
+
+Run urlchecker --help for every flag.
+`)
 }
