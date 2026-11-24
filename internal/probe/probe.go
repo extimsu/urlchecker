@@ -10,13 +10,17 @@ import (
 	"github.com/extimsu/urlchecker/internal/target"
 )
 
-// Check runs one check of t and returns how long it took.
+// Check runs one check of t and returns how long it took. The target's own
+// timeout option, when set, replaces timeout.
 func Check(ctx context.Context, t target.Target, timeout time.Duration) (time.Duration, error) {
+	if t.Timeout > 0 {
+		timeout = t.Timeout
+	}
 	switch t.Protocol {
 	case "tcp", "udp":
-		return Dial(ctx, t.Protocol, t.Addr(), timeout)
+		return Dial(ctx, t.Network(), t.Addr(), timeout)
 	case "icmp":
-		return PingOnce(t.Host, timeout)
+		return PingOnce(ctx, t.Host, PingOptionsOf(t), timeout)
 	}
 	return 0, fmt.Errorf("unsupported protocol %q", t.Protocol)
 }
@@ -36,4 +40,9 @@ func Dial(ctx context.Context, network, addr string, timeout time.Duration) (tim
 		return elapsed, err
 	}
 	return elapsed, conn.Close()
+}
+
+// PingOptionsOf returns the ICMP options of t.
+func PingOptionsOf(t target.Target) PingOptions {
+	return PingOptions{IPVersion: t.IPVersion, Size: t.Size, DF: t.DF}
 }

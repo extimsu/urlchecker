@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 // unprivileged ICMP socket (no CAP_NET_RAW and GID outside ping_group_range).
 func skipWithoutICMP(t *testing.T) {
 	t.Helper()
-	p, err := NewPinger("127.0.0.1")
+	p, err := NewPinger(net.ParseIP("127.0.0.1"), PingOptions{})
 	if err != nil {
 		t.Skipf("no ICMP socket here: %v", err)
 	}
@@ -25,12 +26,64 @@ func skipWithoutICMP(t *testing.T) {
 
 func TestPingOnce(t *testing.T) {
 	skipWithoutICMP(t)
-	if _, err := PingOnce("127.0.0.1", time.Second); err != nil {
+	ctx := context.Background()
+	if _, err := PingOnce(ctx, "127.0.0.1", PingOptions{}, time.Second); err != nil {
 		t.Fatalf("ping 127.0.0.1: %v", err)
 	}
+	if _, err := PingOnce(ctx, "127.0.0.1", PingOptions{Size: 1400}, time.Second); err != nil {
+		t.Fatalf("ping 127.0.0.1 with 1400 bytes: %v", err)
+	}
 	// 192.0.2.0/24 is TEST-NET-1: nothing answers there.
-	if _, err := PingOnce("192.0.2.1", 200*time.Millisecond); err == nil {
+	if _, err := PingOnce(ctx, "192.0.2.1", PingOptions{}, 200*time.Millisecond); err == nil {
 		t.Fatal("ping 192.0.2.1 succeeded, want a timeout")
+	}
+}
+
+func TestPingOnceIPv6(t *testing.T) {
+	p, err := NewPinger(net.ParseIP("::1"), PingOptions{})
+	if err != nil {
+		t.Skipf("no ICMPv6 socket here: %v", err)
+	}
+	_ = p.Close()
+	if _, err := PingOnce(context.Background(), "::1", PingOptions{}, time.Second); err != nil {
+		t.Skipf("::1 does not answer here (no IPv6 loopback?): %v", err)
+	}
+	if _, err := PingOnce(context.Background(), "::1", PingOptions{Size: 1000}, time.Second); err != nil {
+		t.Fatalf("ping ::1 with 1000 bytes: %v", err)
+	}
+}
+
+// TestPingDF: a don't-fragment echo that fits still gets a reply; off Linux,
+// df=true is an error. icmp_linux_test.go checks the socket option itself.
+func TestPingDF(t *testing.T) {
+	skipWithoutICMP(t)
+	_, err := PingOnce(context.Background(), "127.0.0.1", PingOptions{DF: true, Size: 1000}, time.Second)
+	if runtime.GOOS != "linux" {
+		if err == nil {
+			t.Fatal("df=true off Linux: want an error")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("df ping that fits: %v", err)
+	}
+}
+
+func TestResolveIP(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct{ host, version, want string }{
+		{"127.0.0.1", "", "127.0.0.1"},
+		{"::1", "", "::1"},
+		{"127.0.0.1", "4", "127.0.0.1"},
+		{"::1", "6", "::1"},
+	} {
+		ip, err := ResolveIP(ctx, c.host, c.version)
+		if err != nil || ip.String() != c.want {
+			t.Errorf("ResolveIP(%q, %q) = %v, %v; want %s", c.host, c.version, ip, err, c.want)
+		}
+	}
+	if ip, err := ResolveIP(ctx, "127.0.0.1", "6"); err == nil {
+		t.Errorf("ResolveIP(127.0.0.1, 6) = %v, want an error", ip)
 	}
 }
 

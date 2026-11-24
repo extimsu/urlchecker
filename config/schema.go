@@ -23,6 +23,11 @@ type Config struct {
 	CheckInterval string `yaml:"check_interval,omitempty" json:"check_interval,omitempty"` // Interval between checks (default: "30s")
 	Workers       int    `yaml:"workers,omitempty" json:"workers,omitempty"`               // Number of worker goroutines (default: 5)
 	PingInterval  string `yaml:"ping_interval,omitempty" json:"ping_interval,omitempty"`   // Interval between echo requests to icmp:// targets (default: "1s")
+	// ReloadInterval is how often the exporter checks the config and target
+	// files for changes (default: "30s"; "0s" turns polling off, SIGHUP still works).
+	ReloadInterval string `yaml:"reload_interval,omitempty" json:"reload_interval,omitempty"`
+	// ResolveInterval is how often a pinger resolves its host name again (default: "1m").
+	ResolveInterval string `yaml:"resolve_interval,omitempty" json:"resolve_interval,omitempty"`
 
 	// Group configuration
 	GroupName string                 `yaml:"group_name,omitempty" json:"group_name,omitempty"` // Default group name for URLs
@@ -73,6 +78,8 @@ func DefaultConfig() *Config {
 		CheckInterval:     "30s",
 		Workers:           5,
 		PingInterval:      "1s",
+		ReloadInterval:    "30s",
+		ResolveInterval:   "1m",
 		WarningThreshold:  "500ms",
 		CriticalThreshold: "1s",
 		RetryCount:        3,
@@ -131,6 +138,12 @@ func (c *Config) Merge(override *Config) {
 	}
 	if override.PingInterval != "" {
 		c.PingInterval = override.PingInterval
+	}
+	if override.ReloadInterval != "" {
+		c.ReloadInterval = override.ReloadInterval
+	}
+	if override.ResolveInterval != "" {
+		c.ResolveInterval = override.ResolveInterval
 	}
 
 	// Merge group configuration
