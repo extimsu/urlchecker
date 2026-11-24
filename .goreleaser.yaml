@@ -1,0 +1,92 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: urlchecker
+
+git:
+  # Chart releases use their own chart-v* tags.
+  ignore_tags: ["chart-v*"]
+
+before:
+  hooks:
+    - go mod tidy -diff
+
+builds:
+  - env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/extimsu/urlchecker/version.Version={{ .Version }}
+      - -X github.com/extimsu/urlchecker/version.GitCommit={{ .ShortCommit }}
+      - -X github.com/extimsu/urlchecker/version.BuildDate={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - { goos: darwin, goarch: arm }
+      - { goos: windows, goarch: arm }
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - { goos: windows, formats: [zip] }
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args: [sign-blob, "--bundle=${signature}", "${artifact}", --yes]
+    output: true
+
+dockers_v2:
+  - dockerfile: Dockerfile.release
+    images:
+      - ghcr.io/extimsu/urlchecker
+      - '{{ if index .Env "DOCKERHUB_USERNAME" }}docker.io/extim/urlchecker{{ end }}'
+    tags:
+      - "{{ .Version }}"
+      - '{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}'
+      - '{{ if not .Prerelease }}latest{{ end }}'
+    platforms: [linux/amd64, linux/arm64, linux/arm/v7]
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.description: TCP, UDP and ICMP reachability checks and Prometheus exporter
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.licenses: MIT
+    # Index annotations need a multi-platform push; snapshots build one image
+    # per platform, so leave them empty there (empty values are skipped).
+    annotations:
+      index:org.opencontainers.image.source: '{{ if not .IsSnapshot }}{{ .GitURL }}{{ end }}'
+      index:org.opencontainers.image.description: '{{ if not .IsSnapshot }}TCP, UDP and ICMP reachability checks and Prometheus exporter{{ end }}'
+      index:org.opencontainers.image.licenses: '{{ if not .IsSnapshot }}MIT{{ end }}'
+
+docker_signs:
+  - cmd: cosign
+    args: [sign, "${artifact}@${digest}", --yes]
+    output: true
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude: ["^docs", "^test", "^chore\\(deps\\)", "^Merge"]
+  groups:
+    - { title: Breaking changes, regexp: '^.*?\w+(\(.+\))?!:', order: 0 }
+    - { title: Features, regexp: '^.*?feat(\(.+\))?:', order: 1 }
+    - { title: Fixes, regexp: '^.*?fix(\(.+\))?:', order: 2 }
+    - { title: Other, order: 999 }
+
+release:
+  footer: |
+    Images: `ghcr.io/extimsu/urlchecker:{{ .Version }}`. Verify a signature with
+    `cosign verify ghcr.io/extimsu/urlchecker:{{ .Version }} --certificate-identity-regexp 'https://github.com/extimsu/urlchecker/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`.

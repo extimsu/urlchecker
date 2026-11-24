@@ -20,9 +20,9 @@ func LoadConfig(filePath string) (*Config, error) {
 
 	// Auto-detect format based on file extension
 	format := detectFormat(filePath, data)
-	
+
 	var config Config
-	
+
 	switch format {
 	case "yaml":
 		err = yaml.Unmarshal(data, &config)
@@ -53,7 +53,7 @@ func SaveConfig(config *Config, filePath string) error {
 
 	// Determine format based on file extension
 	ext := strings.ToLower(filepath.Ext(filePath))
-	
+
 	switch ext {
 	case ".yaml", ".yml":
 		data, err = yaml.Marshal(config)
@@ -82,7 +82,7 @@ func SaveConfig(config *Config, filePath string) error {
 func detectFormat(filePath string, data []byte) string {
 	// First, try to detect by file extension
 	ext := strings.ToLower(filepath.Ext(filePath))
-	
+
 	switch ext {
 	case ".yaml", ".yml":
 		return "yaml"
@@ -92,12 +92,12 @@ func detectFormat(filePath string, data []byte) string {
 
 	// If extension is ambiguous or missing, try to detect by content
 	content := strings.TrimSpace(string(data))
-	
+
 	// Check if it starts with { or [ (JSON)
 	if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
 		return "json"
 	}
-	
+
 	// Check if it contains YAML indicators
 	if strings.Contains(content, ":") && !strings.Contains(content, "{") && !strings.Contains(content, "}") {
 		return "yaml"

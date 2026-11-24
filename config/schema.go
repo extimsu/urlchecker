@@ -67,7 +67,7 @@ func DefaultConfig() *Config {
 		CheckInterval:           "30s",
 		Workers:                 5,
 		PingInterval:            "1s",
-		WarningThreshold:       "500ms",
+		WarningThreshold:        "500ms",
 		CriticalThreshold:       "1s",
 		RetryCount:              3,
 		RetryDelay:              "1s",
