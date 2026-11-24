@@ -4,11 +4,12 @@
 
 {{ template "chart.description" . }}
 
-The exporter checks TCP and UDP targets every `checks.interval`. It pings each
-`icmp://` target every `checks.pingInterval` and exports
-smokeping_prober-style counters, so you can alert on packet loss. The
-[urlchecker README](https://github.com/extimsu/urlchecker#readme) covers the
-target syntax and every metric.
+The exporter checks TCP, UDP, HTTP(S) and DNS targets every `checks.interval`.
+It pings each `icmp://` target every `checks.pingInterval` and exports
+smokeping_prober-style counters, so you can alert on packet loss. In a
+DaemonSet it can find the nodes itself and measure loss between every pair.
+The [urlchecker README](https://github.com/extimsu/urlchecker#readme) covers the
+target syntax, every option and every metric.
 
 ## Install
 
@@ -16,8 +17,11 @@ target syntax and every metric.
 helm install probe oci://ghcr.io/extimsu/charts/urlchecker \
   --version {{ template "chart.version" . }} \
   --namespace monitoring --create-namespace \
-  --set 'targets={example.com:443,icmp://1.1.1.1}'
+  --set 'targets={https://example.com/,icmp://1.1.1.1}'
 ```
+
+Images are on `ghcr.io/extimsu/urlchecker` (also `docker.io/extim/urlchecker`),
+multi-arch and signed with cosign; so is the chart.
 
 Upgrade with `helm upgrade`. Remove the release with `helm uninstall probe -n monitoring`.
 
@@ -28,9 +32,10 @@ from inside the cluster.
 
 ```yaml
 targets:
-  - api.example.com:443
+  - https://api.example.com/health status=200 body="ok" {team="api"}
+  - dns://10.0.0.53/example.com type=A
   - udp://10.0.0.53:53
-  - icmp://10.0.0.1
+  - icmp://10.0.0.1 size=1472 df=true
 serviceMonitor:
   enabled: true
   labels:
@@ -45,9 +50,11 @@ pod still passes the `restricted` Pod Security Standard.
 
 ## Node-to-node packet loss (DaemonSet)
 
-This mode runs one pod per node in the node's network namespace. Each pod pings
-every node, so the loss you measure is on the node network itself, not on the
-CNI overlay.
+This mode runs one pod per node in the node's network namespace. With node
+discovery on, each pod lists the nodes through the Kubernetes API and pings
+every other node's InternalIP, so the loss you measure is on the node network
+itself, not on the CNI overlay. New nodes are picked up within
+`discovery.nodes.interval`, and removed nodes are dropped with their series.
 
 ```yaml
 workload:
@@ -61,11 +68,12 @@ metrics:
   port: 9375               # must be free on every node
 service:
   port: 9375
-targets:                   # every node's internal IP, plus a TCP port to check
-  - icmp://10.0.0.11
-  - 10.0.0.11:10250
-  - icmp://10.0.0.12
-  - 10.0.0.12:10250
+discovery:
+  nodes:
+    enabled: true          # creates a ClusterRole with list on nodes
+    icmp: true
+    tcpPorts: [10250]      # also check the kubelet port
+    excludeSelf: true      # don't ping your own node
 serviceMonitor:
   enabled: true
   relabelings:             # label each series with the probing node
@@ -73,51 +81,49 @@ serviceMonitor:
       targetLabel: node
 ```
 
-Pod sysctls can't change the node's own network namespace. So with
-`hostNetwork` the unprivileged ping socket works only if the nodes'
-`net.ipv4.ping_group_range` already includes the pod's group. If it doesn't,
-use `icmp.rawSocket`. The chart refuses `icmp://` targets with `hostNetwork`
-unless `icmp.rawSocket` is set. A `restricted` namespace rejects this mode, so
-install it in a namespace labelled `pod-security.kubernetes.io/enforce: privileged`
-or `baseline`.
-
-The loss per pair, from the probing node to each target, is:
+Each discovered target has the label `target_node` on
+`urlchecker_target_info`, so you can name the probed node in queries:
 
 ```promql
-1 - (
-  rate(urlchecker_icmp_response_duration_seconds_count[5m])
-    / rate(urlchecker_icmp_requests_total[5m])
+(
+  1 - rate(urlchecker_icmp_response_duration_seconds_count[5m])
+      / rate(urlchecker_icmp_requests_total[5m])
 )
+* on (instance, host) group_left (target_node)
+  label_replace(urlchecker_target_info{protocol="icmp"}, "host", "$1", "target", "(.*)")
 ```
 
 To alert per bad node rather than per pair, count how many of a node's peers
 see loss, and fire when it is half or more. A single bad path then doesn't
 page, and a bad node does.
 
-## Grafana dashboard
+Pod sysctls can't change the node's own network namespace. So with
+`hostNetwork` the unprivileged ping socket works only if the nodes'
+`net.ipv4.ping_group_range` already includes the pod's group. If it doesn't,
+use `icmp.rawSocket`. The chart refuses ICMP with `hostNetwork` unless
+`icmp.rawSocket` is set. A `restricted` namespace rejects this mode, so
+install it in a namespace labelled `pod-security.kubernetes.io/enforce: privileged`
+or `baseline`.
+
+## Alert rules
 
 ```yaml
-grafanaDashboard:
+prometheusRule:
   enabled: true
-  annotations:
-    grafana_folder: Monitoring   # with the sidecar's folderAnnotation set
+  labels:
+    release: kube-prometheus-stack   # whatever your Prometheus selects
+  rules:
+    packetLoss:
+      threshold: 0.02                # 2%
 ```
 
-This ships [`dashboards/urlchecker.json`](dashboards/urlchecker.json) as a
-ConfigMap labelled `grafana_dashboard: "1"`. The Grafana sidecar of the grafana
-and kube-prometheus-stack charts loads ConfigMaps with that label. If the
-sidecar watches only its own namespace, set `grafanaDashboard.namespace` to that
-namespace. Without the sidecar, import the JSON file in Grafana under
-**Dashboards → New → Import**.
-
-The dashboard shows:
-
-- target status and p95 response time;
-- ICMP loss and round trip;
-- a smokeping-style round-trip heatmap;
-- a loss matrix of instance × target.
-
-In DaemonSet mode, each instance is one node.
+This creates a PrometheusRule with `UrlcheckerTargetDown`,
+`UrlcheckerPacketLoss`, `UrlcheckerTLSCertExpiringSoon` and
+`UrlcheckerConfigReloadFailed`. Each rule has `enabled`, `for` and `severity`.
+`additionalLabels` go on every alert, and `extraRules` are appended. The rules
+select this release's series with `namespace="<release namespace>"`, which a
+ServiceMonitor scrape sets; set `prometheusRule.selector` for other scrape
+setups, e.g. `job="urlchecker"`.
 
 ## Targets from your own ConfigMap
 
@@ -125,14 +131,21 @@ In DaemonSet mode, each instance is one node.
 existingConfigMap: my-targets   # key urls.txt, one target per line
 ```
 
-When the ConfigMap changes, restart the pods yourself, because the chart only
-hashes `targets`.
+urlchecker reloads the target file when its content changes, so a ConfigMap
+edit takes effect without a restart. The kubelet syncs ConfigMap volumes about
+once a minute, and urlchecker checks every `checks.reloadInterval`.
 
 ## Image
 
 `image.tag` defaults to the chart's `appVersion`. For an immutable pin, set
 `image.digest`. To pull through a proxy, set `image.registry`, for example
-`harbor.example.com/docker.io`.
+`harbor.example.com/ghcr.io`. Verify the image signature with:
+
+```console
+cosign verify ghcr.io/extimsu/urlchecker:{{ template "chart.appVersion" . }} \
+  --certificate-identity-regexp 'https://github.com/extimsu/urlchecker/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 ## Test
 
@@ -154,5 +167,8 @@ helm unittest charts/urlchecker
 helm-docs --chart-search-root charts   # regenerate this README
 ```
 
-CI runs the same checks plus an install test on kind in both modes. Publishing
-happens on a `chart-v<version>` tag.
+CI runs the same checks plus install tests on kind: a Deployment in a
+`restricted` namespace, a host-network DaemonSet, and node discovery on a
+two-node cluster, all with an image built from the same commit. Publishing
+happens on a `chart-v<version>` tag. The dashboard JSON is generated by
+`hack/gen-dashboard.py`; CI fails when they differ.

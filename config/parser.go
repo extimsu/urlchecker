@@ -120,6 +120,7 @@ func validateConfig(config *Config) error {
 		"ping_interval":      config.PingInterval,
 		"reload_interval":    config.ReloadInterval,
 		"resolve_interval":   config.ResolveInterval,
+		"discovery_interval": config.DiscoveryInterval,
 	} {
 		if v == "" {
 			continue

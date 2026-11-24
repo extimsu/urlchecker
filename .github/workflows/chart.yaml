@@ -1,11 +1,11 @@
 name: chart
 
+# The install test builds the image from the same commit, so code changes run
+# it too.
 on:
   pull_request:
-    paths: [charts/**, .github/workflows/chart.yaml]
   push:
     branches: [master]
-    paths: [charts/**, .github/workflows/chart.yaml]
     tags: [chart-v*]
 
 permissions:
@@ -34,10 +34,15 @@ jobs:
         run: |
           for f in "$CHART"/ci/*.yaml; do
             helm template t "$CHART" -f "$f" --set serviceMonitor.enabled=true --set podDisruptionBudget.enabled=true \
+                --set prometheusRule.enabled=true --set grafanaDashboard.enabled=true \
               | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary \
                   -schema-location default \
                   -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
           done
+      - name: dashboard JSON is up to date
+        run: |
+          python3 hack/gen-dashboard.py
+          git diff --exit-code -- "$CHART/dashboards"
       - name: README is up to date (helm-docs)
         run: |
           docker run --rm -v "$PWD:/w" -w /w jnorwood/helm-docs:v1.14.2 --chart-search-root charts
@@ -49,13 +54,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [deployment, daemonset]
+        mode: [deployment, daemonset, discovery]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: ${{ env.HELM_VERSION }}
       - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          config: ${{ matrix.mode == 'discovery' && '.github/kind-2-nodes.yaml' || '' }}
+      - name: build the image from this commit
+        run: |
+          docker build -t ghcr.io/extimsu/urlchecker:ci .
+          kind load docker-image ghcr.io/extimsu/urlchecker:ci --name chart-testing
       - name: install and helm test
         run: |
           ns=default
@@ -65,10 +76,24 @@ jobs:
             kubectl create ns $ns
             kubectl label ns $ns pod-security.kubernetes.io/enforce=restricted
           fi
-          helm install probe "$CHART" -n $ns -f "$CHART/ci/${{ matrix.mode }}-values.yaml" --wait --timeout 3m
+          helm install probe "$CHART" -n $ns -f "$CHART/ci/${{ matrix.mode }}-values.yaml" \
+            --set image.tag=ci --set image.pullPolicy=Never --wait --timeout 3m
           sleep 10
           # The test pod is deleted on success; a failed one stays for the debug step.
           helm test probe -n $ns
+      - name: every node pings the other one
+        if: matrix.mode == 'discovery'
+        run: |
+          sleep 15
+          for pod in $(kubectl get pods -l app.kubernetes.io/name=urlchecker -o name); do
+            pod=${pod#pod/}
+            node=$(kubectl get pod "$pod" -o jsonpath='{.spec.nodeName}')
+            m=$(kubectl get --raw "/api/v1/namespaces/default/pods/$pod:19376/proxy/metrics")
+            echo "== $pod on $node"; echo "$m" | grep -E '^urlchecker_(target_info|icmp_requests_total|current_status)'
+            echo "$m" | grep -q 'urlchecker_target_info{.*target_node=' || { echo "no discovered targets"; exit 1; }
+            echo "$m" | grep -q "target_node=\"$node\"" && { echo "$pod checks its own node"; exit 1; }
+            echo "$m" | grep -qE '^urlchecker_icmp_requests_total\{.*\} [1-9]' || { echo "no pings sent"; exit 1; }
+          done
       - name: debug
         if: failure()
         run: |

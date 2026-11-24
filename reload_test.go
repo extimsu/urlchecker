@@ -88,3 +88,20 @@ func TestRunRejectsDuplicateTargets(t *testing.T) {
 		t.Errorf("exit %d for a duplicate target, want %d", got, exitConfig)
 	}
 }
+
+func TestSourcesMerge(t *testing.T) {
+	var got []target.Target
+	s := &sources{apply: func(ts []target.Target) { got = ts }}
+	a, _ := target.Parse("icmp://10.0.0.1", "tcp", "80")
+	b, _ := target.Parse(`icmp://10.0.0.2 {target_node="w2"}`, "tcp", "80")
+	dupOfA, _ := target.Parse(`icmp://10.0.0.1 {target_node="w1"}`, "tcp", "80")
+	s.setStatic([]target.Target{a})
+	s.setDiscovered([]target.Target{dupOfA, b})
+	if len(got) != 2 || got[0].Labels != nil || got[1].Key() != "icmp://10.0.0.2" {
+		t.Errorf("merged %+v: want the static 10.0.0.1 and the discovered 10.0.0.2", got)
+	}
+	s.setStatic(nil)
+	if len(got) != 2 || got[0].Labels["target_node"] != "w1" {
+		t.Errorf("after the static target left: %+v, want both discovered", got)
+	}
+}

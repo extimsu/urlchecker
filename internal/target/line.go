@@ -41,7 +41,8 @@ func splitLine(line string) (tgt string, opts [][2]string, labels map[string]str
 }
 
 // splitFields splits on spaces; a double-quoted value may contain spaces and
-// \" or \\ escapes: body="status: ok".
+// the escapes \" and \\. Any other backslash is kept, so regular expressions
+// work as written: body="\"ok\":\s*true".
 func splitFields(s string) ([]string, error) {
 	var fields []string
 	var cur strings.Builder
@@ -49,6 +50,9 @@ func splitFields(s string) ([]string, error) {
 	for _, r := range s {
 		switch {
 		case escaped:
+			if r != '"' && r != '\\' {
+				cur.WriteRune('\\')
+			}
 			cur.WriteRune(r)
 			escaped = false
 		case inQuote && r == '\\':

@@ -1,5 +1,5 @@
 {{- include "urlchecker.validate" . }}
-{{- if not .Values.existingConfigMap }}
+{{- if and (not .Values.existingConfigMap) .Values.targets }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

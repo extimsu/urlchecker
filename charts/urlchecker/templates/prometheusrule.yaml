@@ -1,0 +1,70 @@
+{{- if .Values.prometheusRule.enabled }}
+{{- $r := .Values.prometheusRule.rules }}
+{{- $add := .Values.prometheusRule.additionalLabels }}
+{{- $sel := .Values.prometheusRule.selector | default (printf "namespace=%q" .Release.Namespace) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "urlchecker.fullname" . }}
+  namespace: {{ .Values.prometheusRule.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "urlchecker.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: {{ include "urlchecker.fullname" . }}
+      rules:
+        {{- if $r.targetDown.enabled }}
+        - alert: UrlcheckerTargetDown
+          expr: urlchecker_current_status{ {{- $sel -}} } == 0
+          for: {{ $r.targetDown.for }}
+          labels:
+            severity: {{ $r.targetDown.severity }}
+            {{- with $add }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "{{ "{{" }} $labels.protocol {{ "}}" }} check of {{ "{{" }} $labels.url {{ "}}" }} is failing"
+            description: "urlchecker on {{ "{{" }} $labels.instance {{ "}}" }} has failed to check {{ "{{" }} $labels.url {{ "}}" }} ({{ "{{" }} $labels.protocol {{ "}}" }}) for {{ $r.targetDown.for }}."
+        {{- end }}
+        {{- if $r.packetLoss.enabled }}
+        - alert: UrlcheckerPacketLoss
+          expr: |
+            1 - (
+              rate(urlchecker_icmp_response_duration_seconds_count{ {{- $sel -}} }[5m])
+              / (rate(urlchecker_icmp_requests_total{ {{- $sel -}} }[5m]) > 0)
+            ) > {{ $r.packetLoss.threshold }}
+          for: {{ $r.packetLoss.for }}
+          labels:
+            severity: {{ $r.packetLoss.severity }}
+            {{- with $add }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "Packet loss to {{ "{{" }} $labels.host {{ "}}" }}"
+            description: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of echo requests from {{ "{{" }} $labels.instance {{ "}}" }} to {{ "{{" }} $labels.host {{ "}}" }} ({{ "{{" }} $labels.ip {{ "}}" }}) got no reply over 5m."
+        {{- end }}
+        {{- if $r.certExpiry.enabled }}
+        - alert: UrlcheckerTLSCertExpiringSoon
+          expr: urlchecker_tls_cert_expiry_timestamp_seconds{ {{- $sel -}} } - time() < {{ mul $r.certExpiry.days 86400 }}
+          for: {{ $r.certExpiry.for }}
+          labels:
+            severity: {{ $r.certExpiry.severity }}
+            {{- with $add }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "TLS certificate of {{ "{{" }} $labels.url {{ "}}" }} expires soon"
+            description: "The certificate {{ "{{" }} $labels.url {{ "}}" }} serves expires in {{ "{{" }} $value | humanizeDuration {{ "}}" }}."
+        {{- end }}
+        {{- if $r.reloadFailed.enabled }}
+        - alert: UrlcheckerConfigReloadFailed
+          expr: urlchecker_config_last_reload_successful{ {{- $sel -}} } == 0
+          for: {{ $r.reloadFailed.for }}
+          labels:
+            severity: {{ $r.reloadFailed.severity }}
+            {{- with $add }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "urlchecker on {{ "{{" }} $labels.instance {{ "}}" }} cannot load its targets"
+            description: "The last reload of the target file failed; urlchecker keeps checking the previous targets. Check its logs."
+        {{- end }}
+        {{- with .Values.prometheusRule.extraRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

@@ -63,15 +63,26 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if not (has .Values.workload.kind (list "Deployment" "DaemonSet")) }}
 {{- fail "workload.kind must be Deployment or DaemonSet" }}
 {{- end }}
-{{- if and (not .Values.existingConfigMap) (not .Values.targets) }}
-{{- fail "set targets (or existingConfigMap): urlchecker needs at least one target" }}
+{{- if not (or .Values.existingConfigMap .Values.targets .Values.discovery.nodes.enabled) }}
+{{- fail "set targets, existingConfigMap or discovery.nodes.enabled: urlchecker needs at least one target" }}
+{{- end }}
+{{- if .Values.discovery.nodes.enabled }}
+{{- if not (or .Values.discovery.nodes.icmp .Values.discovery.nodes.tcpPorts) }}
+{{- fail "discovery.nodes needs icmp: true or at least one tcpPorts entry" }}
+{{- end }}
+{{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.name) }}
+{{- fail "discovery.nodes needs a ServiceAccount: set serviceAccount.create or serviceAccount.name" }}
+{{- end }}
+{{- if and .Values.hostNetwork .Values.discovery.nodes.icmp (not .Values.icmp.rawSocket) }}
+{{- fail "discovery.nodes.icmp with hostNetwork needs icmp.rawSocket=true: pod sysctls cannot change the node's ping_group_range" }}
+{{- end }}
 {{- end }}
 {{- if and .Values.serviceMonitor.enabled (not .Values.service.enabled) }}
 {{- fail "serviceMonitor.enabled needs service.enabled" }}
 {{- end }}
 {{- if and .Values.hostNetwork (not .Values.icmp.rawSocket) }}
 {{- range .Values.targets }}
-{{- if hasPrefix "icmp://" (lower .) }}
+{{- if hasPrefix "icmp://" (lower (trim .)) }}
 {{- fail "icmp:// targets with hostNetwork need icmp.rawSocket=true: pod sysctls cannot change the node's ping_group_range" }}
 {{- end }}
 {{- end }}

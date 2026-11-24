@@ -19,6 +19,7 @@ import (
 
 	"github.com/extimsu/urlchecker/config"
 	"github.com/extimsu/urlchecker/help"
+	"github.com/extimsu/urlchecker/internal/discovery"
 	"github.com/extimsu/urlchecker/internal/exporter"
 	"github.com/extimsu/urlchecker/internal/target"
 	"github.com/extimsu/urlchecker/internal/web"
@@ -47,6 +48,7 @@ type settings struct {
 	checkInterval, pingInterval     time.Duration
 	reloadInterval, resolveInterval time.Duration
 	targets                         []target.Target
+	discovery                       *discovery.NodeOptions // nil when off
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -75,6 +77,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		logFormat       = fs.String("log-format", "text", "log format: text or json")
 		reloadInterval  = fs.Duration("reload-interval", 30*time.Second, "exporter: check the config and target files for changes this often (0 = only on SIGHUP)")
 		resolveInterval = fs.Duration("resolve-interval", time.Minute, "exporter: resolve icmp:// host names again this often")
+		discoverNodes   = fs.String("discover-nodes", "", "exporter in Kubernetes: check every node's InternalIP, ex: icmp,tcp:10250")
+		excludeSelf     = fs.Bool("discover-exclude-self", false, "skip the node named in $NODE_NAME (the pod's own node)")
+		discoveryEvery  = fs.Duration("discovery-interval", 30*time.Second, "how often to list the nodes")
 		configFile      = fs.String("config", "", "YAML or JSON config file; flags override it")
 	)
 	// Deprecated in 0.3.0: accepted so existing command lines keep working.
@@ -95,27 +100,30 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	apply := map[string]func(*config.Config){
-		"url":              func(c *config.Config) { c.URLs = splitList(*url) },
-		"port":             func(c *config.Config) { c.Port = *port },
-		"protocol":         func(c *config.Config) { c.Protocol = *protocol },
-		"timeout":          func(c *config.Config) { c.Timeout = *timeout },
-		"file":             func(c *config.Config) { c.File = *file },
-		"json":             func(c *config.Config) { c.JSONOutput = *jsonOutput },
-		"metrics":          func(c *config.Config) { c.Metrics = *enableMetrics },
-		"exporter":         func(c *config.Config) { c.Exporter = *enableExporter },
-		"metrics-port":     func(c *config.Config) { c.MetricsPort = *metricsPort },
-		"check-interval":   func(c *config.Config) { c.CheckInterval = checkInterval.String() },
-		"workers":          func(c *config.Config) { c.Workers = *workers },
-		"ping-interval":    func(c *config.Config) { c.PingInterval = pingInterval.String() },
-		"group":            func(c *config.Config) { c.GroupName = *group },
-		"warn-threshold":   func(c *config.Config) { c.WarningThreshold = warn.String() },
-		"crit-threshold":   func(c *config.Config) { c.CriticalThreshold = crit.String() },
-		"retry-count":      func(c *config.Config) { c.RetryCount = *retryCount },
-		"retry-delay":      func(c *config.Config) { c.RetryDelay = retryDelay.String() },
-		"log-level":        func(c *config.Config) { c.LogLevel = *logLevel },
-		"log-format":       func(c *config.Config) { c.LogFormat = *logFormat },
-		"reload-interval":  func(c *config.Config) { c.ReloadInterval = reloadInterval.String() },
-		"resolve-interval": func(c *config.Config) { c.ResolveInterval = resolveInterval.String() },
+		"url":                   func(c *config.Config) { c.URLs = splitList(*url) },
+		"port":                  func(c *config.Config) { c.Port = *port },
+		"protocol":              func(c *config.Config) { c.Protocol = *protocol },
+		"timeout":               func(c *config.Config) { c.Timeout = *timeout },
+		"file":                  func(c *config.Config) { c.File = *file },
+		"json":                  func(c *config.Config) { c.JSONOutput = *jsonOutput },
+		"metrics":               func(c *config.Config) { c.Metrics = *enableMetrics },
+		"exporter":              func(c *config.Config) { c.Exporter = *enableExporter },
+		"metrics-port":          func(c *config.Config) { c.MetricsPort = *metricsPort },
+		"check-interval":        func(c *config.Config) { c.CheckInterval = checkInterval.String() },
+		"workers":               func(c *config.Config) { c.Workers = *workers },
+		"ping-interval":         func(c *config.Config) { c.PingInterval = pingInterval.String() },
+		"group":                 func(c *config.Config) { c.GroupName = *group },
+		"warn-threshold":        func(c *config.Config) { c.WarningThreshold = warn.String() },
+		"crit-threshold":        func(c *config.Config) { c.CriticalThreshold = crit.String() },
+		"retry-count":           func(c *config.Config) { c.RetryCount = *retryCount },
+		"retry-delay":           func(c *config.Config) { c.RetryDelay = retryDelay.String() },
+		"log-level":             func(c *config.Config) { c.LogLevel = *logLevel },
+		"log-format":            func(c *config.Config) { c.LogFormat = *logFormat },
+		"reload-interval":       func(c *config.Config) { c.ReloadInterval = reloadInterval.String() },
+		"resolve-interval":      func(c *config.Config) { c.ResolveInterval = resolveInterval.String() },
+		"discover-nodes":        func(c *config.Config) { c.DiscoverNodes = *discoverNodes },
+		"discover-exclude-self": func(c *config.Config) { c.DiscoverExcludeSelf = *excludeSelf },
+		"discovery-interval":    func(c *config.Config) { c.DiscoveryInterval = discoveryEvery.String() },
 	}
 	// load reads the config file, applies the flags and loads the targets.
 	// The exporter calls it again to reload.
@@ -154,7 +162,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		log.Warn("config key is deprecated and ignored", "key", key)
 	}
 
-	if len(s.targets) == 0 {
+	if s.discovery != nil && !cfg.Exporter {
+		return fail(stderr, errors.New("--discover-nodes needs --exporter"))
+	}
+	if len(s.targets) == 0 && s.discovery == nil {
 		help.Show(stderr)
 		return exitConfig
 	}
@@ -247,6 +258,23 @@ func resolve(cfg *config.Config) (*settings, error) {
 	if err := target.Unique(s.targets); err != nil {
 		return nil, err
 	}
+
+	if cfg.DiscoverNodes != "" {
+		icmp, ports, err := discovery.ParseSpec(cfg.DiscoverNodes)
+		if err != nil {
+			return nil, err
+		}
+		every, err := time.ParseDuration(cfg.DiscoveryInterval)
+		if err != nil || every <= 0 {
+			return nil, fmt.Errorf("invalid discovery interval %q", cfg.DiscoveryInterval)
+		}
+		s.discovery = &discovery.NodeOptions{ICMP: icmp, TCPPorts: ports, Interval: every}
+		if cfg.DiscoverExcludeSelf {
+			if s.discovery.ExcludeNode = os.Getenv("NODE_NAME"); s.discovery.ExcludeNode == "" {
+				return nil, errors.New("--discover-exclude-self needs $NODE_NAME (set it from spec.nodeName)")
+			}
+		}
+	}
 	return s, nil
 }
 
@@ -265,7 +293,11 @@ func runExporter(ctx context.Context, s *settings, watched []string, reload func
 	})
 	errc := make(chan error, 1)
 	go func() { errc <- web.Serve(ctx, fmt.Sprintf(":%d", s.cfg.MetricsPort), exp.Ready, log) }()
-	go watchTargets(ctx, watched, s.reloadInterval, reload, exp.SetTargets, log)
+	src := &sources{static: s.targets, apply: exp.SetTargets}
+	go watchTargets(ctx, watched, s.reloadInterval, reload, src.setStatic, log)
+	if s.discovery != nil {
+		go discovery.WatchNodes(ctx, *s.discovery, src.setDiscovered, log)
+	}
 	exp.Run(ctx, s.targets)
 	if err := <-errc; err != nil {
 		log.Error("metrics server failed", "error", err)

@@ -1,23 +1,27 @@
 # urlchecker
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
+![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.0](https://img.shields.io/badge/AppVersion-0.3.0-informational?style=flat-square)
 
-Prometheus exporter that checks TCP, UDP and ICMP reachability. Runs as a Deployment for endpoint checks or as a host-network DaemonSet for node-to-node packet loss.
+Prometheus exporter for TCP, UDP, ICMP, HTTP(S) and DNS checks. Runs as a Deployment for endpoint checks or as a host-network DaemonSet that finds every node and measures node-to-node packet loss.
 
-The exporter checks TCP and UDP targets every `checks.interval`. It pings each
-`icmp://` target every `checks.pingInterval` and exports
-smokeping_prober-style counters, so you can alert on packet loss. The
-[urlchecker README](https://github.com/extimsu/urlchecker#readme) covers the
-target syntax and every metric.
+The exporter checks TCP, UDP, HTTP(S) and DNS targets every `checks.interval`.
+It pings each `icmp://` target every `checks.pingInterval` and exports
+smokeping_prober-style counters, so you can alert on packet loss. In a
+DaemonSet it can find the nodes itself and measure loss between every pair.
+The [urlchecker README](https://github.com/extimsu/urlchecker#readme) covers the
+target syntax, every option and every metric.
 
 ## Install
 
 ```console
 helm install probe oci://ghcr.io/extimsu/charts/urlchecker \
-  --version 0.2.0 \
+  --version 0.3.0 \
   --namespace monitoring --create-namespace \
-  --set 'targets={example.com:443,icmp://1.1.1.1}'
+  --set 'targets={https://example.com/,icmp://1.1.1.1}'
 ```
+
+Images are on `ghcr.io/extimsu/urlchecker` (also `docker.io/extim/urlchecker`),
+multi-arch and signed with cosign; so is the chart.
 
 Upgrade with `helm upgrade`. Remove the release with `helm uninstall probe -n monitoring`.
 
@@ -28,9 +32,10 @@ from inside the cluster.
 
 ```yaml
 targets:
-  - api.example.com:443
+  - https://api.example.com/health status=200 body="ok" {team="api"}
+  - dns://10.0.0.53/example.com type=A
   - udp://10.0.0.53:53
-  - icmp://10.0.0.1
+  - icmp://10.0.0.1 size=1472 df=true
 serviceMonitor:
   enabled: true
   labels:
@@ -45,9 +50,11 @@ pod still passes the `restricted` Pod Security Standard.
 
 ## Node-to-node packet loss (DaemonSet)
 
-This mode runs one pod per node in the node's network namespace. Each pod pings
-every node, so the loss you measure is on the node network itself, not on the
-CNI overlay.
+This mode runs one pod per node in the node's network namespace. With node
+discovery on, each pod lists the nodes through the Kubernetes API and pings
+every other node's InternalIP, so the loss you measure is on the node network
+itself, not on the CNI overlay. New nodes are picked up within
+`discovery.nodes.interval`, and removed nodes are dropped with their series.
 
 ```yaml
 workload:
@@ -61,11 +68,12 @@ metrics:
   port: 9375               # must be free on every node
 service:
   port: 9375
-targets:                   # every node's internal IP, plus a TCP port to check
-  - icmp://10.0.0.11
-  - 10.0.0.11:10250
-  - icmp://10.0.0.12
-  - 10.0.0.12:10250
+discovery:
+  nodes:
+    enabled: true          # creates a ClusterRole with list on nodes
+    icmp: true
+    tcpPorts: [10250]      # also check the kubelet port
+    excludeSelf: true      # don't ping your own node
 serviceMonitor:
   enabled: true
   relabelings:             # label each series with the probing node
@@ -73,51 +81,49 @@ serviceMonitor:
       targetLabel: node
 ```
 
-Pod sysctls can't change the node's own network namespace. So with
-`hostNetwork` the unprivileged ping socket works only if the nodes'
-`net.ipv4.ping_group_range` already includes the pod's group. If it doesn't,
-use `icmp.rawSocket`. The chart refuses `icmp://` targets with `hostNetwork`
-unless `icmp.rawSocket` is set. A `restricted` namespace rejects this mode, so
-install it in a namespace labelled `pod-security.kubernetes.io/enforce: privileged`
-or `baseline`.
-
-The loss per pair, from the probing node to each target, is:
+Each discovered target has the label `target_node` on
+`urlchecker_target_info`, so you can name the probed node in queries:
 
 ```promql
-1 - (
-  rate(urlchecker_icmp_response_duration_seconds_count[5m])
-    / rate(urlchecker_icmp_requests_total[5m])
+(
+  1 - rate(urlchecker_icmp_response_duration_seconds_count[5m])
+      / rate(urlchecker_icmp_requests_total[5m])
 )
+* on (instance, host) group_left (target_node)
+  label_replace(urlchecker_target_info{protocol="icmp"}, "host", "$1", "target", "(.*)")
 ```
 
 To alert per bad node rather than per pair, count how many of a node's peers
 see loss, and fire when it is half or more. A single bad path then doesn't
 page, and a bad node does.
 
-## Grafana dashboard
+Pod sysctls can't change the node's own network namespace. So with
+`hostNetwork` the unprivileged ping socket works only if the nodes'
+`net.ipv4.ping_group_range` already includes the pod's group. If it doesn't,
+use `icmp.rawSocket`. The chart refuses ICMP with `hostNetwork` unless
+`icmp.rawSocket` is set. A `restricted` namespace rejects this mode, so
+install it in a namespace labelled `pod-security.kubernetes.io/enforce: privileged`
+or `baseline`.
+
+## Alert rules
 
 ```yaml
-grafanaDashboard:
+prometheusRule:
   enabled: true
-  annotations:
-    grafana_folder: Monitoring   # with the sidecar's folderAnnotation set
+  labels:
+    release: kube-prometheus-stack   # whatever your Prometheus selects
+  rules:
+    packetLoss:
+      threshold: 0.02                # 2%
 ```
 
-This ships [`dashboards/urlchecker.json`](dashboards/urlchecker.json) as a
-ConfigMap labelled `grafana_dashboard: "1"`. The Grafana sidecar of the grafana
-and kube-prometheus-stack charts loads ConfigMaps with that label. If the
-sidecar watches only its own namespace, set `grafanaDashboard.namespace` to that
-namespace. Without the sidecar, import the JSON file in Grafana under
-**Dashboards → New → Import**.
-
-The dashboard shows:
-
-- target status and p95 response time;
-- ICMP loss and round trip;
-- a smokeping-style round-trip heatmap;
-- a loss matrix of instance × target.
-
-In DaemonSet mode, each instance is one node.
+This creates a PrometheusRule with `UrlcheckerTargetDown`,
+`UrlcheckerPacketLoss`, `UrlcheckerTLSCertExpiringSoon` and
+`UrlcheckerConfigReloadFailed`. Each rule has `enabled`, `for` and `severity`.
+`additionalLabels` go on every alert, and `extraRules` are appended. The rules
+select this release's series with `namespace="<release namespace>"`, which a
+ServiceMonitor scrape sets; set `prometheusRule.selector` for other scrape
+setups, e.g. `job="urlchecker"`.
 
 ## Targets from your own ConfigMap
 
@@ -125,14 +131,21 @@ In DaemonSet mode, each instance is one node.
 existingConfigMap: my-targets   # key urls.txt, one target per line
 ```
 
-When the ConfigMap changes, restart the pods yourself, because the chart only
-hashes `targets`.
+urlchecker reloads the target file when its content changes, so a ConfigMap
+edit takes effect without a restart. The kubelet syncs ConfigMap volumes about
+once a minute, and urlchecker checks every `checks.reloadInterval`.
 
 ## Image
 
 `image.tag` defaults to the chart's `appVersion`. For an immutable pin, set
 `image.digest`. To pull through a proxy, set `image.registry`, for example
-`harbor.example.com/docker.io`.
+`harbor.example.com/ghcr.io`. Verify the image signature with:
+
+```console
+cosign verify ghcr.io/extimsu/urlchecker:0.3.0 \
+  --certificate-identity-regexp 'https://github.com/extimsu/urlchecker/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 ## Test
 
@@ -151,15 +164,21 @@ Kubernetes: `>=1.25.0-0`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Affinity rules. |
-| automountServiceAccountToken | bool | `false` | Mount the ServiceAccount token. urlchecker does not call the Kubernetes API. |
+| automountServiceAccountToken | bool | `false` | Mount the ServiceAccount token. Only node discovery calls the Kubernetes API, and the chart mounts the token when it is on, whatever this says. |
 | checks.defaultPort | string | `"80"` | Port for targets without one. |
 | checks.defaultProtocol | string | `"tcp"` | Protocol for targets without a prefix: `tcp`, `udp` or `icmp`. |
 | checks.interval | string | `"30s"` | Interval between TCP/UDP checks. |
 | checks.pingInterval | string | `"1s"` | Interval between echo requests per `icmp://` target. |
+| checks.reloadInterval | string | `"30s"` | How often urlchecker checks the target file for changes. |
 | checks.timeout | string | `"5s"` | TCP connect timeout. The echo-reply wait is capped at `pingInterval`. |
-| checks.workers | int | `5` | Concurrent TCP/UDP checks. |
+| checks.workers | int | `5` | Concurrent TCP, UDP, HTTP and DNS checks. |
 | commonLabels | object | `{}` | Labels added to every resource. |
 | configMapKey | string | `"urls.txt"` | Key of the target list in the ConfigMap. |
+| discovery.nodes.enabled | bool | `false` | Check every node in the cluster, found through the Kubernetes API (needs list on nodes; the chart creates the ClusterRole). Targets get the label `target_node` on `urlchecker_target_info`. |
+| discovery.nodes.excludeSelf | bool | `true` | Skip the node the pod runs on (useful with a DaemonSet). |
+| discovery.nodes.icmp | bool | `true` | Ping each node's InternalIP. |
+| discovery.nodes.interval | string | `"30s"` | How often to list the nodes. |
+| discovery.nodes.tcpPorts | list | `[]` | Also connect to these TCP ports on each node, e.g. `[10250]` (kubelet). |
 | dnsPolicy | string | `""` | Pod DNS policy. Empty means `ClusterFirstWithHostNet` with `hostNetwork`, else the Kubernetes default. |
 | existingConfigMap | string | `""` | Use an existing ConfigMap with the target list instead of `targets`. |
 | extraArgs | list | `[]` | Extra command-line flags, e.g. `["--warn-threshold=200ms"]`. |
@@ -175,14 +194,11 @@ Kubernetes: `>=1.25.0-0`
 | icmp.rawSocket | bool | `false` | Open raw ICMP sockets: runs the container as UID 0 with only the `NET_RAW` capability. Needed with `hostNetwork: true` when the nodes' `net.ipv4.ping_group_range` does not include the pod's group. When false, the pod gets the `net.ipv4.ping_group_range` sysctl so the non-root user can use the unprivileged ping socket (pod network only). |
 | image.digest | string | `""` | Image digest (`sha256:...`). When set it wins over `tag`. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
-| image.registry | string | `"docker.io"` | Image registry. |
-| image.repository | string | `"extim/urlchecker"` | Image repository. |
+| image.registry | string | `"ghcr.io"` | Image registry. Images are also on `docker.io/extim/urlchecker`. |
+| image.repository | string | `"extimsu/urlchecker"` | Image repository. |
 | image.tag | string | `""` | Image tag. Defaults to the chart appVersion. |
 | imagePullSecrets | list | `[]` | Pull secrets, e.g. `[{name: regcred}]`. |
-| livenessProbe.failureThreshold | int | `3` |  |
-| livenessProbe.httpGet.path | string | `"/metrics"` |  |
-| livenessProbe.httpGet.port | string | `"metrics"` |  |
-| livenessProbe.periodSeconds | int | `30` |  |
+| livenessProbe | object | `{"failureThreshold":3,"httpGet":{"path":"/healthz","port":"metrics"},"periodSeconds":30}` | Liveness probe: the process is alive. |
 | metrics.port | int | `9090` | Port of the `/metrics` endpoint. |
 | nameOverride | string | `""` | Override the chart name used in resource names. |
 | nodeSelector | object | `{}` | Node selector. |
@@ -192,9 +208,28 @@ Kubernetes: `>=1.25.0-0`
 | podLabels | object | `{}` | Pod labels. |
 | podSecurityContext | object | `{"fsGroup":65532,"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod security context. The UID/GID match the image's distroless `nonroot` user; `icmp.rawSocket` switches the container to UID 0. |
 | priorityClassName | string | `""` | Priority class name. |
-| readinessProbe.httpGet.path | string | `"/metrics"` |  |
-| readinessProbe.httpGet.port | string | `"metrics"` |  |
-| readinessProbe.periodSeconds | int | `10` |  |
+| prometheusRule.additionalLabels | object | `{}` | Labels added to every alert. |
+| prometheusRule.enabled | bool | `false` | Create a Prometheus Operator PrometheusRule with the alerts below. |
+| prometheusRule.extraRules | list | `[]` | Extra Prometheus rules appended to the group. |
+| prometheusRule.labels | object | `{}` | Extra labels, e.g. the selector your Prometheus uses for rules. |
+| prometheusRule.namespace | string | `""` | Namespace for the PrometheusRule. Defaults to the release namespace. |
+| prometheusRule.rules.certExpiry.days | int | `14` |  |
+| prometheusRule.rules.certExpiry.enabled | bool | `true` | Alert when an HTTPS certificate expires within `days`. |
+| prometheusRule.rules.certExpiry.for | string | `"1h"` |  |
+| prometheusRule.rules.certExpiry.severity | string | `"warning"` |  |
+| prometheusRule.rules.packetLoss.enabled | bool | `true` | Alert on ICMP loss above `threshold` (0.05 = 5%) over 5 minutes. |
+| prometheusRule.rules.packetLoss.for | string | `"10m"` |  |
+| prometheusRule.rules.packetLoss.severity | string | `"warning"` |  |
+| prometheusRule.rules.packetLoss.threshold | float | `0.05` |  |
+| prometheusRule.rules.reloadFailed.enabled | bool | `true` | Alert when the target file cannot be loaded. |
+| prometheusRule.rules.reloadFailed.for | string | `"10m"` |  |
+| prometheusRule.rules.reloadFailed.severity | string | `"warning"` |  |
+| prometheusRule.rules.targetDown.enabled | bool | `true` | Alert when a TCP, UDP, HTTP or DNS check keeps failing. |
+| prometheusRule.rules.targetDown.for | string | `"5m"` |  |
+| prometheusRule.rules.targetDown.severity | string | `"warning"` |  |
+| prometheusRule.selector | string | `""` | PromQL label matchers that pick this release's series. Defaults to `namespace="<release namespace>"`, which a ServiceMonitor scrape sets. |
+| rbac.create | bool | `true` | Create the ClusterRole and ClusterRoleBinding node discovery needs. |
+| readinessProbe | object | `{"httpGet":{"path":"/readyz","port":"metrics"},"periodSeconds":10}` | Readiness probe: targets loaded and checks running. |
 | replicaCount | int | `1` | Pods for `workload.kind: Deployment`. Each replica checks every target, so more than one replica only adds vantage points. |
 | resources | object | `{"limits":{"memory":"64Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}` | Resource requests and limits. |
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Container security context. `icmp.rawSocket` adds `NET_RAW`. |
@@ -212,7 +247,7 @@ Kubernetes: `>=1.25.0-0`
 | serviceMonitor.namespace | string | `""` | Namespace for the ServiceMonitor. Defaults to the release namespace. |
 | serviceMonitor.relabelings | list | `[]` | Relabelings applied before the scrape. |
 | serviceMonitor.scrapeTimeout | string | `"10s"` | Scrape timeout. |
-| targets | list | `[]` | Targets to check, one per entry. `host`, `host:port`, `tcp://host:port`, `udp://host:port` or `icmp://host`. Rendered into a ConfigMap. Ignored when `existingConfigMap` is set. |
+| targets | list | `[]` | Targets to check, one per entry: `host:port`, `tcp://`, `udp://`, `icmp://`, `http(s)://` URLs or `dns://[resolver]/name`, each with optional `key=value` options and a `{label="value"}` block. Rendered into a ConfigMap that urlchecker reloads on change. Ignored when `existingConfigMap` is set. |
 | terminationGracePeriodSeconds | int | `10` | Termination grace period. |
 | tests.image | string | `"docker.io/library/busybox:1.37.0"` | Image for the `helm test` pod that fetches `/metrics`. |
 | tolerations | list | `[]` | Tolerations. For a DaemonSet on every node, use `[{operator: Exists}]`. |
@@ -228,5 +263,8 @@ helm unittest charts/urlchecker
 helm-docs --chart-search-root charts   # regenerate this README
 ```
 
-CI runs the same checks plus an install test on kind in both modes. Publishing
-happens on a `chart-v<version>` tag.
+CI runs the same checks plus install tests on kind: a Deployment in a
+`restricted` namespace, a host-network DaemonSet, and node discovery on a
+two-node cluster, all with an image built from the same commit. Publishing
+happens on a `chart-v<version>` tag. The dashboard JSON is generated by
+`hack/gen-dashboard.py`; CI fails when they differ.

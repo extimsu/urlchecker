@@ -184,3 +184,13 @@ func TestParseHTTPAndDNS(t *testing.T) {
 		}
 	}
 }
+
+func TestOptionQuoting(t *testing.T) {
+	got, err := Parse(`https://h/ body="\"database\":\s*\"ok\" \\d+"`, "tcp", "80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"database":\s*"ok" \d+`; got.Body != want {
+		t.Errorf("body = %q, want %q: only \\\" and \\\\ are escapes", got.Body, want)
+	}
+}

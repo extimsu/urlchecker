@@ -1,0 +1,28 @@
+{{- if and .Values.discovery.nodes.enabled .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "urlchecker.fullname" . }}
+  labels:
+    {{- include "urlchecker.labels" . | nindent 4 }}
+rules:
+  # Node discovery lists the nodes and reads their InternalIP.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "urlchecker.fullname" . }}
+  labels:
+    {{- include "urlchecker.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "urlchecker.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "urlchecker.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

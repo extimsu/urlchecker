@@ -1,0 +1,19 @@
+# CI install test: host-network DaemonSet that discovers the nodes itself.
+workload:
+  kind: DaemonSet
+hostNetwork: true
+icmp:
+  rawSocket: true
+metrics:
+  port: 19376
+service:
+  port: 19376
+tolerations:
+  - operator: Exists
+discovery:
+  nodes:
+    enabled: true
+    tcpPorts: [10250]
+    interval: 5s
+checks:
+  interval: 5s
