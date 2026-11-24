@@ -8,10 +8,12 @@ import (
 
 // Show prints the short usage to w.
 func Show(w io.Writer) {
-	_, _ = fmt.Fprint(w, `urlchecker checks TCP, UDP and ICMP reachability.
+	_, _ = fmt.Fprint(w, `urlchecker checks TCP, UDP, ICMP, HTTP(S) and DNS targets.
 
 Usage:
   urlchecker --url example.com:443[,icmp://10.0.0.1]   check once, exit 1 if a target is down
+  urlchecker --url "https://example.com/health status=200 body=ok"
+  urlchecker --url "dns://10.0.0.53/example.com type=A"
   urlchecker --file targets.txt                         one target per line
   urlchecker --metrics --check-interval 30s             check repeatedly and serve /metrics
   urlchecker --exporter --file targets.txt              Prometheus exporter; ICMP every --ping-interval

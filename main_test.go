@@ -95,7 +95,7 @@ func TestCheckerRetries(t *testing.T) {
 	if r, _ := c.check(context.Background(), tg); r.State != "Failed" {
 		t.Fatalf("state %q, want Failed", r.State)
 	}
-	if n := testutil.ToFloat64(metrics.RetryAttemptsCounter.WithLabelValues(tg.Addr(), "tcp")); n != 2 {
+	if n := testutil.ToFloat64(metrics.RetryAttemptsCounter.WithLabelValues(tg.MetricName(), "tcp")); n != 2 {
 		t.Errorf("%v retries recorded, want 2", n)
 	}
 	if n := testutil.ToFloat64(metrics.CurrentStatusGauge.WithLabelValues(tg.Addr(), "tcp")); n != 0 {

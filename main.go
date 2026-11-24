@@ -55,7 +55,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var (
 		url             = fs.String("url", "", "targets to check, comma-separated, ex: example.com:443,icmp://10.0.0.1")
 		port            = fs.String("port", "80", "port for targets without one, ex: 443")
-		protocol        = fs.String("protocol", "tcp", "protocol for targets without a prefix: tcp, udp or icmp")
+		protocol        = fs.String("protocol", "tcp", "protocol for targets without a prefix: tcp, udp, icmp, http, https or dns")
 		timeout         = fs.String("timeout", "5s", "connect timeout, ex: 3s")
 		file            = fs.String("file", "", "file with one target per line, ex: urls.txt")
 		jsonOutput      = fs.Bool("json", false, "JSON output (one-shot and metrics modes)")

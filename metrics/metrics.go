@@ -140,6 +140,7 @@ func DeleteCheck(url, protocol string) {
 	}{TotalChecksCounter, FailedChecksCounter, ResponseTimeHistogram, CurrentStatusGauge, CheckDurationHistogram, RetryAttemptsCounter} {
 		v.DeleteLabelValues(url, protocol)
 	}
+	deleteDetails(url)
 }
 
 // DeleteICMP removes every series of an ICMP target, for any resolved IP.
@@ -154,6 +155,9 @@ func ResetMetrics() {
 		TotalChecksCounter, FailedChecksCounter, ResponseTimeHistogram, CurrentStatusGauge, CheckDurationHistogram,
 		GroupHealthGauge, GroupTotalURLsGauge, GroupHealthyURLsGauge, RetryAttemptsCounter, ICMPRequests, ICMPResponseDuration,
 	} {
+		v.Reset()
+	}
+	for _, v := range detailVecs {
 		v.Reset()
 	}
 }

@@ -10,19 +10,33 @@ import (
 	"github.com/extimsu/urlchecker/internal/target"
 )
 
-// Check runs one check of t and returns how long it took. The target's own
-// timeout option, when set, replaces timeout.
-func Check(ctx context.Context, t target.Target, timeout time.Duration) (time.Duration, error) {
+// Result is what a check measured. HTTP and DNS are set for those protocols,
+// also when the check failed after getting a response.
+type Result struct {
+	Duration time.Duration
+	HTTP     *HTTPInfo
+	DNS      *DNSInfo
+}
+
+// Check runs one check of t. The target's own timeout option, when set,
+// replaces timeout.
+func Check(ctx context.Context, t target.Target, timeout time.Duration) (Result, error) {
 	if t.Timeout > 0 {
 		timeout = t.Timeout
 	}
 	switch t.Protocol {
 	case "tcp", "udp":
-		return Dial(ctx, t.Network(), t.Addr(), timeout)
+		d, err := Dial(ctx, t.Network(), t.Addr(), timeout)
+		return Result{Duration: d}, err
 	case "icmp":
-		return PingOnce(ctx, t.Host, PingOptionsOf(t), timeout)
+		d, err := PingOnce(ctx, t.Host, PingOptionsOf(t), timeout)
+		return Result{Duration: d}, err
+	case "http", "https":
+		return HTTP(ctx, t, timeout)
+	case "dns":
+		return DNS(ctx, t, timeout)
 	}
-	return 0, fmt.Errorf("unsupported protocol %q", t.Protocol)
+	return Result{}, fmt.Errorf("unsupported protocol %q", t.Protocol)
 }
 
 // Dial opens a TCP or UDP connection to addr and closes it right away.

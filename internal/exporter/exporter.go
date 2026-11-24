@@ -210,7 +210,7 @@ func (e *Exporter) check(ctx context.Context, en *entry) {
 	if en.removed.Load() {
 		return
 	}
-	rtt, err := probe.Check(ctx, en.t, e.opts.Timeout)
+	res, err := probe.Check(ctx, en.t, e.opts.Timeout)
 	if ctx.Err() != nil {
 		return // shutting down: the failure is ours, not the target's
 	}
@@ -219,8 +219,9 @@ func (e *Exporter) check(ctx context.Context, en *entry) {
 	if en.removed.Load() {
 		return // removed while checking: don't bring its series back
 	}
-	metrics.RecordCheck(en.t.MetricName(), en.t.Protocol, err == nil, rtt.Seconds())
-	metrics.RecordCheckDuration(en.t.MetricName(), en.t.Protocol, rtt.Seconds())
+	metrics.RecordCheck(en.t.MetricName(), en.t.Protocol, err == nil, res.Duration.Seconds())
+	metrics.RecordCheckDuration(en.t.MetricName(), en.t.Protocol, res.Duration.Seconds())
+	metrics.RecordDetails(en.t.MetricName(), res)
 	e.setStateLocked(en, err)
 }
 

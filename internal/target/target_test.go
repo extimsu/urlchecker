@@ -35,7 +35,7 @@ func TestParse(t *testing.T) {
 }
 
 func TestParseErrors(t *testing.T) {
-	for _, in := range []string{"", "ftp://example.com", "tcp://", "a b:80", "http://x/y"} {
+	for _, in := range []string{"", "ftp://example.com", "tcp://", "a b:80", "http:///path", "https://u:p@h/", "dns://", "dns://10.0.0.53", "dns:///"} {
 		if got, err := Parse(in, "tcp", "80"); err == nil {
 			t.Errorf("Parse(%q) = %+v, want an error", in, got)
 		}
@@ -145,5 +145,42 @@ func TestEqualAndUnique(t *testing.T) {
 	}
 	if err := Unique([]Target{a}); err != nil {
 		t.Errorf("Unique of one target: %v", err)
+	}
+}
+
+func TestParseHTTPAndDNS(t *testing.T) {
+	for _, c := range []struct {
+		in, key, metric string
+		want            Target
+	}{
+		{"https://example.com", "https://example.com/", "https://example.com/",
+			Target{Protocol: "https", Host: "example.com", Port: "443", URL: "https://example.com/", Method: "GET", Status: "200-399"}},
+		{"http://[2001:db8::1]:8080/health?x=1 method=head status=2xx,301 body=\"ok\" follow=false insecure=true host=api.local",
+			"http://[2001:db8::1]:8080/health?x=1", "http://[2001:db8::1]:8080/health?x=1",
+			Target{Protocol: "http", Host: "2001:db8::1", Port: "8080", URL: "http://[2001:db8::1]:8080/health?x=1",
+				Method: "HEAD", Status: "2xx,301", Body: "ok", NoFollow: true, Insecure: true, HostHeader: "api.local"}},
+		{"dns:///example.com", "dns:///example.com", "dns:///example.com",
+			Target{Protocol: "dns", Name: "example.com", RecordType: "A"}},
+		{"dns://10.0.0.53/example.com. type=mx expect=mail", "dns://10.0.0.53:53/example.com", "dns://10.0.0.53:53/example.com",
+			Target{Protocol: "dns", Host: "10.0.0.53", Port: "53", Name: "example.com", RecordType: "MX", Expect: "mail"}},
+		{"dns://[::1]:5353/x.test", "dns://[::1]:5353/x.test", "dns://[::1]:5353/x.test",
+			Target{Protocol: "dns", Host: "::1", Port: "5353", Name: "x.test", RecordType: "A"}},
+	} {
+		got, err := Parse(c.in, "tcp", "80")
+		if err != nil {
+			t.Errorf("Parse(%q): %v", c.in, err)
+			continue
+		}
+		if !got.Equal(c.want) || got.Key() != c.key || got.MetricName() != c.metric {
+			t.Errorf("Parse(%q)\n got %+v key %q metric %q\nwant %+v key %q metric %q", c.in, got, got.Key(), got.MetricName(), c.want, c.key, c.metric)
+		}
+	}
+	for _, in := range []string{
+		"https://h status=600", "https://h status=abc", "https://h body=(", "https://h method=g-t", "https://h follow=maybe",
+		"dns:///h type=SOA", "dns:///h expect=(", "dns:///h size=1", "icmp://h status=200",
+	} {
+		if got, err := Parse(in, "tcp", "80"); err == nil {
+			t.Errorf("Parse(%q) = %+v, want an error", in, got)
+		}
 	}
 }

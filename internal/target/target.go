@@ -2,7 +2,9 @@
 // key=value options and an optional label block:
 //
 //	host | host:port | tcp://host:port | udp://host:port | icmp://host
+//	http://host[:port]/path | https://host[:port]/path | dns://[resolver[:port]]/name
 //	icmp://10.0.0.1 size=1472 df=true {node="worker-1"}
+//	https://api.example.com/health status=200 body="ok" {team="api"}
 package target
 
 import (
@@ -10,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,20 +23,34 @@ import (
 )
 
 // Protocols lists the supported protocols.
-var Protocols = []string{"tcp", "udp", "icmp"}
+var Protocols = []string{"tcp", "udp", "icmp", "http", "https", "dns"}
 
 // Target is one thing to check.
 type Target struct {
 	Protocol string // tcp, udp or icmp
 	Host     string // host name or IP, without brackets
-	Port     string // empty for icmp
+	Port     string // empty for icmp; the resolver port for dns
 	Group    string // group from a [group:name] section or the config
+	URL      string // http and https: the full URL
+	Name     string // dns: the name to look up
 
 	// Options.
 	Timeout   time.Duration // timeout=; 0 means the global timeout
 	IPVersion string        // ip=4 or ip=6; empty prefers IPv4
 	Size      int           // size=: ICMP payload bytes; 0 means the default
 	DF        bool          // df=true: ICMP with the don't-fragment bit (Linux)
+
+	// HTTP options.
+	Method     string // method=; default GET
+	Status     string // status=: 200, 2xx, 200-299 or a comma list; default 200-399
+	Body       string // body=: a regular expression the body must match
+	Insecure   bool   // insecure=true: skip TLS verification
+	NoFollow   bool   // follow=false: don't follow redirects
+	HostHeader string // host=: the Host header
+
+	// DNS options.
+	RecordType string // type=: A, AAAA, CNAME, MX, NS, TXT, SRV or PTR; default A
+	Expect     string // expect=: a regular expression one answer must match
 
 	// Labels from the {name="value"} block, exported on urlchecker_target_info.
 	Labels map[string]string
@@ -48,7 +66,25 @@ func (t Target) Addr() string {
 }
 
 // Key identifies a target across reloads.
-func (t Target) Key() string { return t.Protocol + "://" + t.Addr() }
+func (t Target) Key() string {
+	switch t.Protocol {
+	case "http", "https":
+		return t.URL
+	case "dns":
+		return "dns://" + t.resolverAddr() + "/" + t.Name
+	}
+	return t.Protocol + "://" + t.Addr()
+}
+
+// Resolver is the DNS server for a dns target, or "" for the system resolver.
+func (t Target) Resolver() string { return t.resolverAddr() }
+
+func (t Target) resolverAddr() string {
+	if t.Host == "" {
+		return ""
+	}
+	return net.JoinHostPort(t.Host, t.Port)
+}
 
 // String is the target as written in a file, with its protocol.
 func (t Target) String() string { return t.Key() }
@@ -56,19 +92,24 @@ func (t Target) String() string { return t.Key() }
 // MetricName is the value that identifies the target on its metrics: the
 // url label of the check metrics, or the host label of the ICMP metrics.
 func (t Target) MetricName() string {
-	if t.Protocol == "icmp" {
+	switch t.Protocol {
+	case "icmp":
 		return t.Host
+	case "http", "https", "dns":
+		return t.Key()
 	}
 	return t.Addr()
 }
 
 // Network is the network to dial or resolve: "tcp", "tcp4", "udp6", "ip"...
 func (t Target) Network() string {
-	base := t.Protocol
-	if base == "icmp" {
-		base = "ip"
+	switch t.Protocol {
+	case "icmp":
+		return "ip" + t.IPVersion
+	case "http", "https":
+		return "tcp" + t.IPVersion
 	}
-	return base + t.IPVersion
+	return t.Protocol + t.IPVersion // tcp, udp; dns picks udp or tcp per query
 }
 
 // Equal reports whether a and b are the same target with the same settings
@@ -113,6 +154,65 @@ var options = map[string]option{
 		t.DF = b
 		return nil
 	}},
+}
+
+var (
+	httpOnly = []string{"http", "https"}
+	dnsOnly  = []string{"dns"}
+	// statusSpec matches 200, 2xx, 200-299 and comma lists of them.
+	statusSpec = regexp.MustCompile(`^([1-5][0-9x]{2}(-[1-5][0-9]{2})?)(,([1-5][0-9x]{2}(-[1-5][0-9]{2})?))*$`)
+	dnsTypes   = []string{"A", "AAAA", "CNAME", "MX", "NS", "TXT", "SRV", "PTR"}
+)
+
+func init() {
+	setBool := func(dst func(*Target, bool)) func(*Target, string) error {
+		return func(t *Target, v string) error {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return fmt.Errorf("want true or false")
+			}
+			dst(t, b)
+			return nil
+		}
+	}
+	regex := func(dst func(*Target, string)) func(*Target, string) error {
+		return func(t *Target, v string) error {
+			if _, err := regexp.Compile(v); err != nil {
+				return fmt.Errorf("invalid regular expression: %w", err)
+			}
+			dst(t, v)
+			return nil
+		}
+	}
+	options["method"] = option{httpOnly, func(t *Target, v string) error {
+		v = strings.ToUpper(v)
+		if !regexp.MustCompile(`^[A-Z]+$`).MatchString(v) {
+			return fmt.Errorf("want an HTTP method like GET or HEAD")
+		}
+		t.Method = v
+		return nil
+	}}
+	options["status"] = option{httpOnly, func(t *Target, v string) error {
+		v = strings.ToLower(strings.ReplaceAll(v, " ", ""))
+		if !statusSpec.MatchString(v) {
+			return fmt.Errorf("want codes like 200, 2xx, 200-299 or 200,301")
+		}
+		t.Status = v
+		return nil
+	}}
+	options["body"] = option{httpOnly, regex(func(t *Target, v string) { t.Body = v })}
+	options["insecure"] = option{httpOnly, setBool(func(t *Target, b bool) { t.Insecure = b })}
+	options["follow"] = option{httpOnly, setBool(func(t *Target, b bool) { t.NoFollow = !b })}
+	options["host"] = option{httpOnly, func(t *Target, v string) error { t.HostHeader = v; return nil }}
+	options["type"] = option{dnsOnly, func(t *Target, v string) error {
+		v = strings.ToUpper(v)
+		if !slices.Contains(dnsTypes, v) {
+			return fmt.Errorf("want one of %s", strings.Join(dnsTypes, ", "))
+		}
+		t.RecordType = v
+		return nil
+	}}
+	options["expect"] = option{dnsOnly, regex(func(t *Target, v string) { t.Expect = v })}
 }
 
 // OptionNames lists the options valid for a protocol, sorted.
@@ -168,6 +268,13 @@ func parseTarget(s, defProto, defPort string) (Target, error) {
 		return Target{}, fmt.Errorf("target %q: unsupported protocol %q (want one of %s)", s, proto, strings.Join(Protocols, ", "))
 	}
 
+	switch proto {
+	case "http", "https":
+		return parseHTTP(s, proto, rest)
+	case "dns":
+		return parseDNS(s, rest)
+	}
+
 	t := Target{Protocol: proto}
 	if h, p, err := net.SplitHostPort(rest); err == nil {
 		t.Host, t.Port = h, p
@@ -182,6 +289,41 @@ func parseTarget(s, defProto, defPort string) (Target, error) {
 	}
 	if t.Port == "" && proto != "icmp" {
 		return Target{}, fmt.Errorf("target %q: no port and no default port", s)
+	}
+	return t, nil
+}
+
+func parseHTTP(s, proto, rest string) (Target, error) {
+	u, err := url.Parse(proto + "://" + rest)
+	if err != nil {
+		return Target{}, fmt.Errorf("target %q: %w", s, err)
+	}
+	if u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return Target{}, fmt.Errorf("target %q: want %s://host[:port]/path, without user info or a #fragment", s, proto)
+	}
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	t := Target{Protocol: proto, Host: u.Hostname(), Port: u.Port(), URL: u.String(), Method: "GET", Status: "200-399"}
+	if t.Port == "" {
+		t.Port = map[string]string{"http": "80", "https": "443"}[proto]
+	}
+	return t, nil
+}
+
+func parseDNS(s, rest string) (Target, error) {
+	resolver, name, ok := strings.Cut(rest, "/")
+	name = strings.TrimSuffix(name, ".")
+	if !ok || name == "" || strings.ContainsAny(name, "/ ") {
+		return Target{}, fmt.Errorf("target %q: want dns://[resolver[:port]]/name, e.g. dns:///example.com or dns://10.0.0.53/example.com", s)
+	}
+	t := Target{Protocol: "dns", Name: name, RecordType: "A"}
+	if resolver != "" {
+		if h, p, err := net.SplitHostPort(resolver); err == nil {
+			t.Host, t.Port = h, p
+		} else {
+			t.Host, t.Port = strings.Trim(resolver, "[]"), "53"
+		}
 	}
 	return t, nil
 }

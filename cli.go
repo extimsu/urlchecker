@@ -68,23 +68,25 @@ type checker struct {
 func (c checker) check(ctx context.Context, t target.Target) (SearchResult, string) {
 	start := time.Now()
 	var err error
+	var res probe.Result
 	for attempt := 0; ; attempt++ {
-		if _, err = probe.Check(ctx, t, c.timeout); err == nil || attempt >= c.retries {
+		if res, err = probe.Check(ctx, t, c.timeout); err == nil || attempt >= c.retries {
 			break
 		}
-		metrics.RecordRetryAttempt(t.Addr(), t.Protocol)
+		metrics.RecordRetryAttempt(t.MetricName(), t.Protocol)
 		if !sleep(ctx, c.backoff(attempt)) {
 			break
 		}
 	}
 	elapsed := time.Since(start)
-	metrics.RecordCheck(t.Addr(), t.Protocol, err == nil, elapsed.Seconds())
-	metrics.RecordCheckDuration(t.Addr(), t.Protocol, elapsed.Seconds())
+	metrics.RecordCheck(t.MetricName(), t.Protocol, err == nil, elapsed.Seconds())
+	metrics.RecordCheckDuration(t.MetricName(), t.Protocol, elapsed.Seconds())
+	metrics.RecordDetails(t.MetricName(), res)
 
 	r := SearchResult{Address: t.Host, Port: t.Port, ResponseTime: elapsed.Seconds(), Group: t.Group, State: "Success"}
 	if err != nil {
 		r.State = "Failed"
-		return r, fmt.Sprintf("😿 [-] [%v]  %v (%.3fs) %v", t.Protocol, t.Addr(), r.ResponseTime, err)
+		return r, fmt.Sprintf("😿 [-] [%v]  %v (%.3fs) %v", t.Protocol, t.MetricName(), r.ResponseTime, err)
 	}
 	status := "🟢"
 	switch {
@@ -93,7 +95,18 @@ func (c checker) check(ctx context.Context, t target.Target) (SearchResult, stri
 	case elapsed > c.warn:
 		status = "🟡"
 	}
-	return r, fmt.Sprintf("%s [+] [%v]  %v (%.3fs)", status, t.Protocol, t.Addr(), r.ResponseTime)
+	return r, fmt.Sprintf("%s [+] [%v]  %v (%.3fs)%s", status, t.Protocol, t.MetricName(), r.ResponseTime, detail(res))
+}
+
+// detail is extra one-shot output for HTTP and DNS.
+func detail(r probe.Result) string {
+	switch {
+	case r.HTTP != nil:
+		return fmt.Sprintf(" HTTP %d", r.HTTP.StatusCode)
+	case r.DNS != nil:
+		return fmt.Sprintf(" %v", r.DNS.Answers)
+	}
+	return ""
 }
 
 // backoff is retryDelay doubled per attempt, ±10% jitter, capped at half the timeout.
