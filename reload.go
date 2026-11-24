@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
+	"sync"
 	"syscall"
 	"time"
 
@@ -79,4 +81,41 @@ func targetInfos(ts []target.Target) []metrics.TargetInfo {
 		infos[i] = metrics.TargetInfo{Protocol: t.Protocol, Target: t.MetricName(), Labels: t.Labels}
 	}
 	return infos
+}
+
+// sources merges the targets from the files and from discovery. A
+// discovered target that is also listed in a file is skipped: the file wins.
+type sources struct {
+	mu         sync.Mutex
+	static     []target.Target
+	discovered []target.Target
+	apply      func([]target.Target)
+}
+
+func (s *sources) setStatic(ts []target.Target) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.static = ts
+	s.apply(s.mergedLocked())
+}
+
+func (s *sources) setDiscovered(ts []target.Target) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.discovered = ts
+	s.apply(s.mergedLocked())
+}
+
+func (s *sources) mergedLocked() []target.Target {
+	out := slices.Clone(s.static)
+	seen := map[string]bool{}
+	for _, t := range s.static {
+		seen[t.Key()] = true
+	}
+	for _, t := range s.discovered {
+		if !seen[t.Key()] {
+			out = append(out, t)
+		}
+	}
+	return out
 }

@@ -18,10 +18,10 @@ workload:
 replicaCount: 1
 
 image:
-  # -- Image registry.
-  registry: docker.io
+  # -- Image registry. Images are also on `docker.io/extim/urlchecker`.
+  registry: ghcr.io
   # -- Image repository.
-  repository: extim/urlchecker
+  repository: extimsu/urlchecker
   # -- Image tag. Defaults to the chart appVersion.
   tag: ""
   # -- Image digest (`sha256:...`). When set it wins over `tag`.
@@ -32,12 +32,15 @@ image:
 # -- Pull secrets, e.g. `[{name: regcred}]`.
 imagePullSecrets: []
 
-# -- Targets to check, one per entry. `host`, `host:port`, `tcp://host:port`,
-# `udp://host:port` or `icmp://host`. Rendered into a ConfigMap. Ignored when
-# `existingConfigMap` is set.
+# -- Targets to check, one per entry: `host:port`, `tcp://`, `udp://`,
+# `icmp://`, `http(s)://` URLs or `dns://[resolver]/name`, each with optional
+# `key=value` options and a `{label="value"}` block. Rendered into a ConfigMap
+# that urlchecker reloads on change. Ignored when `existingConfigMap` is set.
 targets: []
 # - example.com:443
-# - icmp://1.1.1.1
+# - icmp://1.1.1.1 size=1472 df=true
+# - https://example.com/health status=200 {team="web"}
+# - dns:///kubernetes.default.svc.cluster.local
 
 # -- Use an existing ConfigMap with the target list instead of `targets`.
 existingConfigMap: ""
@@ -55,8 +58,25 @@ checks:
   pingInterval: 1s
   # -- TCP connect timeout. The echo-reply wait is capped at `pingInterval`.
   timeout: 5s
-  # -- Concurrent TCP/UDP checks.
+  # -- Concurrent TCP, UDP, HTTP and DNS checks.
   workers: 5
+  # -- How often urlchecker checks the target file for changes.
+  reloadInterval: 30s
+
+discovery:
+  nodes:
+    # -- Check every node in the cluster, found through the Kubernetes API
+    # (needs list on nodes; the chart creates the ClusterRole). Targets get
+    # the label `target_node` on `urlchecker_target_info`.
+    enabled: false
+    # -- Ping each node's InternalIP.
+    icmp: true
+    # -- Also connect to these TCP ports on each node, e.g. `[10250]` (kubelet).
+    tcpPorts: []
+    # -- Skip the node the pod runs on (useful with a DaemonSet).
+    excludeSelf: true
+    # -- How often to list the nodes.
+    interval: 30s
 
 # -- Extra command-line flags, e.g. `["--warn-threshold=200ms"]`.
 extraArgs: []
@@ -124,6 +144,44 @@ grafanaDashboard:
   # `folderAnnotation` set.
   annotations: {}
 
+prometheusRule:
+  # -- Create a Prometheus Operator PrometheusRule with the alerts below.
+  enabled: false
+  # -- Namespace for the PrometheusRule. Defaults to the release namespace.
+  namespace: ""
+  # -- Extra labels, e.g. the selector your Prometheus uses for rules.
+  labels: {}
+  # -- Labels added to every alert.
+  additionalLabels: {}
+  # -- PromQL label matchers that pick this release's series. Defaults to
+  # `namespace="<release namespace>"`, which a ServiceMonitor scrape sets.
+  selector: ""
+  rules:
+    targetDown:
+      # -- Alert when a TCP, UDP, HTTP or DNS check keeps failing.
+      enabled: true
+      for: 5m
+      severity: warning
+    packetLoss:
+      # -- Alert on ICMP loss above `threshold` (0.05 = 5%) over 5 minutes.
+      enabled: true
+      threshold: 0.05
+      for: 10m
+      severity: warning
+    certExpiry:
+      # -- Alert when an HTTPS certificate expires within `days`.
+      enabled: true
+      days: 14
+      for: 1h
+      severity: warning
+    reloadFailed:
+      # -- Alert when the target file cannot be loaded.
+      enabled: true
+      for: 10m
+      severity: warning
+  # -- Extra Prometheus rules appended to the group.
+  extraRules: []
+
 serviceAccount:
   # -- Create a ServiceAccount.
   create: true
@@ -132,8 +190,13 @@ serviceAccount:
   # -- ServiceAccount annotations.
   annotations: {}
 
-# -- Mount the ServiceAccount token. urlchecker does not call the Kubernetes API.
+# -- Mount the ServiceAccount token. Only node discovery calls the Kubernetes
+# API, and the chart mounts the token when it is on, whatever this says.
 automountServiceAccountToken: false
+
+rbac:
+  # -- Create the ClusterRole and ClusterRoleBinding node discovery needs.
+  create: true
 
 # -- Pod annotations.
 podAnnotations: {}
@@ -165,15 +228,17 @@ resources:
   limits:
     memory: 64Mi
 
+# -- Liveness probe: the process is alive.
 livenessProbe:
   httpGet:
-    path: /metrics
+    path: /healthz
     port: metrics
   periodSeconds: 30
   failureThreshold: 3
+# -- Readiness probe: targets loaded and checks running.
 readinessProbe:
   httpGet:
-    path: /metrics
+    path: /readyz
     port: metrics
   periodSeconds: 10
 

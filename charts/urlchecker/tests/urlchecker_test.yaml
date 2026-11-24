@@ -7,6 +7,9 @@ templates:
   - templates/servicemonitor.yaml
   - templates/poddisruptionbudget.yaml
   - templates/grafana-dashboard.yaml
+  - templates/rbac.yaml
+  - templates/prometheusrule.yaml
+  - templates/serviceaccount.yaml
 release:
   name: probe
   namespace: monitoring
@@ -75,7 +78,7 @@ tests:
       targets: []
     asserts:
       - failedTemplate:
-          errorMessage: "set targets (or existingConfigMap): urlchecker needs at least one target"
+          errorMessage: "set targets, existingConfigMap or discovery.nodes.enabled: urlchecker needs at least one target"
 
   - it: uses an existing ConfigMap and skips its own
     set:
@@ -100,10 +103,13 @@ tests:
       - contains: { path: "spec.template.spec.containers[0].args", content: "--ping-interval=2s" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "--warn-threshold=200ms" }
 
-  - it: restarts pods when the targets change
+  - it: reloads targets instead of restarting the pods
     template: templates/workload.yaml
     asserts:
-      - exists: { path: 'spec.template.metadata.annotations["checksum/targets"]' }
+      - notExists: { path: spec.template.metadata.annotations }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "--reload-interval=30s" }
+      - equal: { path: "spec.template.spec.containers[0].livenessProbe.httpGet.path", value: /healthz }
+      - equal: { path: "spec.template.spec.containers[0].readinessProbe.httpGet.path", value: /readyz }
 
   - it: pins the image by digest when one is set
     template: templates/workload.yaml
@@ -112,14 +118,14 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: docker.io/extim/urlchecker@sha256:61f4d1869a5506810348669a1ac51414a84c439a1c60deec543043fdb092b71a
+          value: ghcr.io/extimsu/urlchecker@sha256:61f4d1869a5506810348669a1ac51414a84c439a1c60deec543043fdb092b71a
 
   - it: defaults the image tag to the appVersion
     template: templates/workload.yaml
     chart:
       appVersion: 9.9.9
     asserts:
-      - equal: { path: "spec.template.spec.containers[0].image", value: docker.io/extim/urlchecker:9.9.9 }
+      - equal: { path: "spec.template.spec.containers[0].image", value: ghcr.io/extimsu/urlchecker:9.9.9 }
 
   - it: creates a ServiceMonitor selecting its Service
     template: templates/servicemonitor.yaml
@@ -160,3 +166,83 @@ tests:
       - equal: { path: metadata.labels.grafana_dashboard, value: "1" }
       - equal: { path: metadata.annotations.grafana_folder, value: Monitoring }
       - matchRegex: { path: 'data["urlchecker.json"]', pattern: '"uid": "urlchecker"' }
+
+  - it: discovers nodes with only the RBAC it needs
+    set:
+      targets: []
+      workload.kind: DaemonSet
+      hostNetwork: true
+      icmp.rawSocket: true
+      discovery.nodes.enabled: true
+      discovery.nodes.tcpPorts: [10250]
+    asserts:
+      - hasDocuments: { count: 0 }
+        template: templates/configmap.yaml
+      - contains: { path: "spec.template.spec.containers[0].args", content: "--discover-nodes=icmp,tcp:10250" }
+        template: templates/workload.yaml
+      - contains: { path: "spec.template.spec.containers[0].args", content: "--discover-exclude-self" }
+        template: templates/workload.yaml
+      - notContains: { path: "spec.template.spec.containers[0].args", content: "--file=/etc/urlchecker/urls.txt" }
+        template: templates/workload.yaml
+      - notExists: { path: spec.template.spec.volumes }
+        template: templates/workload.yaml
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: true }
+        template: templates/workload.yaml
+      - equal:
+          path: spec.template.spec.containers[0].env[0]
+          value: { name: NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }
+        template: templates/workload.yaml
+      - equal: { path: automountServiceAccountToken, value: true }
+        template: templates/serviceaccount.yaml
+      - hasDocuments: { count: 2 }
+        template: templates/rbac.yaml
+      - equal:
+          path: rules
+          value: [{ apiGroups: [""], resources: [nodes], verbs: [list] }]
+        template: templates/rbac.yaml
+        documentIndex: 0
+      - equal: { path: "subjects[0].name", value: probe-urlchecker }
+        template: templates/rbac.yaml
+        documentIndex: 1
+
+  - it: creates no RBAC without discovery
+    template: templates/rbac.yaml
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: refuses discovered ICMP on the host network without raw sockets
+    template: templates/workload.yaml
+    set:
+      workload.kind: DaemonSet
+      hostNetwork: true
+      targets: []
+      discovery.nodes.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "discovery.nodes.icmp with hostNetwork needs icmp.rawSocket=true: pod sysctls cannot change the node's ping_group_range"
+
+  - it: renders the alert rules with the release selector
+    template: templates/prometheusrule.yaml
+    set:
+      prometheusRule.enabled: true
+      prometheusRule.additionalLabels: { team: net }
+      prometheusRule.rules.certExpiry.days: 7
+      prometheusRule.rules.reloadFailed.enabled: false
+    asserts:
+      - isKind: { of: PrometheusRule }
+      - lengthEqual: { path: "spec.groups[0].rules", count: 3 }
+      - equal: { path: "spec.groups[0].rules[0].expr", value: 'urlchecker_current_status{namespace="monitoring"} == 0' }
+      - equal: { path: "spec.groups[0].rules[0].labels.team", value: net }
+      - equal: { path: "spec.groups[0].rules[2].alert", value: UrlcheckerTLSCertExpiringSoon }
+      - matchRegex: { path: "spec.groups[0].rules[2].expr", pattern: "< 604800$" }
+
+  - it: accepts target lines with options and labels
+    template: templates/configmap.yaml
+    set:
+      targets: ['icmp://10.0.0.1 size=1472 df=true {node="w1"}', "https://example.com/health status=200"]
+    asserts:
+      - equal:
+          path: data["urls.txt"]
+          value: |
+            icmp://10.0.0.1 size=1472 df=true {node="w1"}
+            https://example.com/health status=200

@@ -5,92 +5,366 @@
     "workload": {
       "type": "object",
       "properties": {
-        "kind": { "type": "string", "enum": ["Deployment", "DaemonSet"] }
+        "kind": {
+          "type": "string",
+          "enum": [
+            "Deployment",
+            "DaemonSet"
+          ]
+        }
       },
-      "required": ["kind"]
+      "required": [
+        "kind"
+      ]
     },
-    "replicaCount": { "type": "integer", "minimum": 0 },
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0
+    },
     "image": {
       "type": "object",
       "properties": {
-        "registry": { "type": "string" },
-        "repository": { "type": "string", "minLength": 1 },
-        "tag": { "type": "string" },
-        "digest": { "type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$" },
-        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64})?$"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
       },
-      "required": ["repository"]
+      "required": [
+        "repository"
+      ]
     },
     "targets": {
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^((tcp|udp|TCP|UDP)://[^\\s:/]+:[0-9]+|(icmp|ICMP)://[^\\s:/]+|[^\\s:/]+(:[0-9]+)?)$"
+        "pattern": "^\\S+(\\s.*)?$",
+        "description": "A target line; urlchecker validates the target, options and labels when it loads them."
       }
     },
-    "existingConfigMap": { "type": "string" },
-    "configMapKey": { "type": "string", "minLength": 1 },
+    "existingConfigMap": {
+      "type": "string"
+    },
+    "configMapKey": {
+      "type": "string",
+      "minLength": 1
+    },
     "checks": {
       "type": "object",
       "properties": {
-        "defaultPort": { "type": ["string", "integer"] },
-        "defaultProtocol": { "type": "string", "enum": ["tcp", "udp", "icmp"] },
-        "interval": { "$ref": "#/definitions/duration" },
-        "pingInterval": { "$ref": "#/definitions/duration" },
-        "timeout": { "$ref": "#/definitions/duration" },
-        "workers": { "type": "integer", "minimum": 1 }
+        "defaultPort": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "defaultProtocol": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp",
+            "icmp",
+            "http",
+            "https",
+            "dns"
+          ]
+        },
+        "interval": {
+          "$ref": "#/definitions/duration"
+        },
+        "pingInterval": {
+          "$ref": "#/definitions/duration"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration"
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reloadInterval": {
+          "$ref": "#/definitions/duration"
+        }
       }
     },
-    "extraArgs": { "type": "array", "items": { "type": "string" } },
+    "extraArgs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "icmp": {
       "type": "object",
-      "properties": { "rawSocket": { "type": "boolean" } }
+      "properties": {
+        "rawSocket": {
+          "type": "boolean"
+        }
+      }
     },
-    "hostNetwork": { "type": "boolean" },
+    "hostNetwork": {
+      "type": "boolean"
+    },
     "dnsPolicy": {
       "type": "string",
-      "enum": ["", "ClusterFirst", "ClusterFirstWithHostNet", "Default", "None"]
+      "enum": [
+        "",
+        "ClusterFirst",
+        "ClusterFirstWithHostNet",
+        "Default",
+        "None"
+      ]
     },
     "metrics": {
       "type": "object",
-      "properties": { "port": { "$ref": "#/definitions/port" } }
+      "properties": {
+        "port": {
+          "$ref": "#/definitions/port"
+        }
+      }
     },
     "service": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
-        "port": { "$ref": "#/definitions/port" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
+        },
+        "port": {
+          "$ref": "#/definitions/port"
+        }
       }
     },
     "serviceMonitor": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "interval": { "$ref": "#/definitions/duration" },
-        "scrapeTimeout": { "$ref": "#/definitions/duration" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "$ref": "#/definitions/duration"
+        },
+        "scrapeTimeout": {
+          "$ref": "#/definitions/duration"
+        }
       }
     },
     "grafanaDashboard": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "namespace": { "type": "string" },
-        "labels": { "type": "object", "additionalProperties": { "type": "string" } },
-        "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
       }
     },
     "podDisruptionBudget": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "minAvailable": { "type": ["integer", "string"] }
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "icmp": {
+              "type": "boolean"
+            },
+            "tcpPorts": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "uniqueItems": true
+            },
+            "excludeSelf": {
+              "type": "boolean"
+            },
+            "interval": {
+              "$ref": "#/definitions/duration"
+            }
+          }
+        }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        }
+      }
+    },
+    "prometheusRule": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "additionalLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "selector": {
+          "type": "string"
+        },
+        "rules": {
+          "type": "object",
+          "properties": {
+            "targetDown": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "for": {
+                  "$ref": "#/definitions/duration"
+                },
+                "severity": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "packetLoss": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "for": {
+                  "$ref": "#/definitions/duration"
+                },
+                "severity": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "threshold": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "certExpiry": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "for": {
+                  "$ref": "#/definitions/duration"
+                },
+                "severity": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "days": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "reloadFailed": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "for": {
+                  "$ref": "#/definitions/duration"
+                },
+                "severity": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "extraRules": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
       }
     }
   },
   "definitions": {
-    "duration": { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" },
-    "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|\u00b5s|ms|s|m|h))+$"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    }
   }
 }

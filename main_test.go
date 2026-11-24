@@ -143,6 +143,9 @@ func TestRunExitCodes(t *testing.T) {
 		{[]string{}, exitConfig},
 		{[]string{"--version"}, exitOK},
 		{[]string{"--url", open, "--circuit-threshold", "3"}, exitOK},
+		{[]string{"--discover-nodes", "icmp"}, exitConfig},                                          // needs --exporter
+		{[]string{"--exporter", "--discover-nodes", "udp:53"}, exitConfig},                          // bad spec
+		{[]string{"--exporter", "--discover-nodes", "icmp", "--discover-exclude-self"}, exitConfig}, // no NODE_NAME
 	} {
 		var stdout, stderr bytes.Buffer
 		if got := run(context.Background(), c.args, &stdout, &stderr); got != c.want {

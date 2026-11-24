@@ -4,11 +4,13 @@
   "tags": [
     "urlchecker",
     "blackbox",
-    "icmp"
+    "icmp",
+    "http",
+    "dns"
   ],
-  "description": "TCP, UDP and ICMP checks from the urlchecker exporter: target status, response time, packet loss and round trip. https://github.com/extimsu/urlchecker",
+  "description": "TCP, UDP, ICMP, HTTP(S) and DNS checks from the urlchecker exporter: status, response time, packet loss, round trip, HTTP phases and certificates. https://github.com/extimsu/urlchecker",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "graphTooltip": 1,
   "refresh": "1m",
@@ -87,7 +89,7 @@
       },
       {
         "name": "target",
-        "label": "TCP/UDP target",
+        "label": "Target",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -168,7 +170,7 @@
     {
       "type": "stat",
       "title": "Targets up",
-      "description": "TCP/UDP targets whose last check passed.",
+      "description": "TCP, UDP, HTTP and DNS targets whose last check passed.",
       "targets": [
         {
           "datasource": {
@@ -227,7 +229,7 @@
     {
       "type": "stat",
       "title": "Targets down",
-      "description": "TCP/UDP targets whose last check failed.",
+      "description": "TCP, UDP, HTTP and DNS targets whose last check failed.",
       "targets": [
         {
           "datasource": {
@@ -290,7 +292,7 @@
     {
       "type": "stat",
       "title": "Failed checks (5m)",
-      "description": "Share of TCP/UDP checks that failed over the last 5 minutes.",
+      "description": "Share of checks that failed over the last 5 minutes.",
       "targets": [
         {
           "datasource": {
@@ -357,7 +359,7 @@
     {
       "type": "stat",
       "title": "Worst ICMP loss (5m)",
-      "description": "Highest packet loss of any instance \u2192 icmp:// target pair over the last 5 minutes.",
+      "description": "Highest packet loss of any instance → icmp:// target pair over the last 5 minutes.",
       "targets": [
         {
           "datasource": {
@@ -427,15 +429,15 @@
     },
     {
       "type": "stat",
-      "title": "ICMP round trip, median (5m)",
-      "description": "Median echo round trip across all icmp:// targets.",
+      "title": "Soonest certificate expiry",
+      "description": "Days until the first HTTPS certificate expires.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(urlchecker_icmp_response_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\", host=~\"$host\"}[5m])))",
+          "expr": "min(urlchecker_tls_cert_expiry_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"} - time()) / 86400",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -444,19 +446,28 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "d",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "red",
                 "value": null
+              },
+              {
+                "color": "orange",
+                "value": 7
+              },
+              {
+                "color": "green",
+                "value": 21
               }
             ]
           },
           "color": {
             "mode": "thresholds"
-          }
+          },
+          "decimals": 0
         },
         "overrides": []
       },
@@ -487,7 +498,7 @@
     {
       "type": "row",
       "id": 7,
-      "title": "TCP and UDP checks",
+      "title": "Checks (TCP, UDP, HTTP, DNS)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -634,7 +645,7 @@
     {
       "type": "timeseries",
       "title": "Response time, p95",
-      "description": "95th percentile TCP connect or UDP response time per target.",
+      "description": "95th percentile check time per target: TCP connect, UDP, a full HTTP request, or a DNS lookup.",
       "targets": [
         {
           "datasource": {
@@ -643,7 +654,7 @@
           },
           "expr": "histogram_quantile(0.95, sum by (instance, url, le) (rate(urlchecker_response_time_seconds_bucket{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"}[$__rate_interval])))",
           "refId": "A",
-          "legendFormat": "{{instance}} \u2192 {{url}}"
+          "legendFormat": "{{instance}} → {{url}}"
         }
       ],
       "fieldConfig": {
@@ -654,7 +665,10 @@
             "lineWidth": 1,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": false
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
           }
         },
         "overrides": []
@@ -699,7 +713,7 @@
           },
           "expr": "urlchecker_current_status{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"}",
           "refId": "A",
-          "legendFormat": "{{instance}} \u2192 {{url}}"
+          "legendFormat": "{{instance}} → {{url}}"
         }
       ],
       "fieldConfig": {
@@ -765,7 +779,7 @@
     {
       "type": "timeseries",
       "title": "Failed checks per second",
-      "description": "Failed TCP/UDP checks per target.",
+      "description": "Failed checks per target.",
       "targets": [
         {
           "datasource": {
@@ -774,7 +788,7 @@
           },
           "expr": "sum by (instance, url) (rate(urlchecker_failed_checks{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"}[$__rate_interval]))",
           "refId": "A",
-          "legendFormat": "{{instance}} \u2192 {{url}}"
+          "legendFormat": "{{instance}} → {{url}}"
         }
       ],
       "fieldConfig": {
@@ -785,7 +799,10 @@
             "lineWidth": 1,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": false
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
           }
         },
         "overrides": []
@@ -821,7 +838,7 @@
     {
       "type": "row",
       "id": 12,
-      "title": "ICMP (icmp:// targets)",
+      "title": "HTTP(S)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -832,9 +849,384 @@
       "panels": []
     },
     {
+      "type": "table",
+      "title": "HTTP endpoints",
+      "description": "Last status code, HTTP version, redirects followed, and days until the earliest certificate in the chain expires.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (instance, url) (urlchecker_http_status_code{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"})",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (instance, url) (urlchecker_http_version{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"})",
+          "refId": "B",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (instance, url) (urlchecker_http_redirects{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"})",
+          "refId": "C",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (instance, url) (urlchecker_tls_cert_expiry_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"} - time()) / 86400",
+          "refId": "D",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "instance": 0,
+              "url": 1
+            },
+            "renameByName": {
+              "url": "URL",
+              "Value #A": "status",
+              "Value #B": "HTTP",
+              "Value #C": "redirects",
+              "Value #D": "cert days left"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 400
+                    },
+                    {
+                      "color": "red",
+                      "value": 500
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "no response",
+                        "color": "red"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HTTP"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "–"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cert days left"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "–",
+                        "color": "transparent"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 7
+                    },
+                    {
+                      "color": "green",
+                      "value": 21
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "id": 13,
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Request phases (stacked)",
+      "description": "Where the time of the last request went: DNS, connect, TLS, server processing (to the first byte) and transfer.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "urlchecker_http_phase_duration_seconds{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"}",
+          "refId": "A",
+          "legendFormat": "{{url}} · {{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 30,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "max",
+            "lastNotNull"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 14,
+      "gridPos": {
+        "x": 12,
+        "y": 31,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "row",
+      "id": 15,
+      "title": "DNS",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 39,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "DNS answers",
+      "description": "Answers returned by the last lookup of each dns:// target. A drop to 0 means the name stopped resolving.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "urlchecker_dns_answers{job=~\"$job\", instance=~\"$instance\", url=~\"$target\"}",
+          "refId": "A",
+          "legendFormat": "{{instance}} → {{url}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "max",
+            "lastNotNull"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 16,
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "row",
+      "id": 17,
+      "title": "ICMP (icmp:// targets)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
       "type": "timeseries",
       "title": "Packet loss",
-      "description": "Share of echo requests without a reply, per instance and target. smokeping_prober's formula: 1 \u2212 replies / requests.",
+      "description": "Share of echo requests without a reply, per instance and target. smokeping_prober's formula: 1 − replies / requests.",
       "targets": [
         {
           "datasource": {
@@ -843,7 +1235,7 @@
           },
           "expr": "clamp_min(1 - sum by (instance, host) (rate(urlchecker_icmp_response_duration_seconds_count{job=~\"$job\", instance=~\"$instance\", host=~\"$host\"}[$__rate_interval])) / (sum by (instance, host) (rate(urlchecker_icmp_requests_total{job=~\"$job\", instance=~\"$instance\", host=~\"$host\"}[$__rate_interval])) > 0), 0)",
           "refId": "A",
-          "legendFormat": "{{instance}} \u2192 {{host}}"
+          "legendFormat": "{{instance}} → {{host}}"
         }
       ],
       "fieldConfig": {
@@ -855,6 +1247,9 @@
             "fillOpacity": 0,
             "showPoints": "never",
             "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            },
             "thresholdsStyle": {
               "mode": "dashed"
             }
@@ -900,10 +1295,10 @@
           "sort": "desc"
         }
       },
-      "id": 13,
+      "id": 18,
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 47,
         "w": 12,
         "h": 8
       },
@@ -924,7 +1319,7 @@
           },
           "expr": "histogram_quantile(0.5, sum by (instance, host, le) (rate(urlchecker_icmp_response_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\", host=~\"$host\"}[$__rate_interval])))",
           "refId": "A",
-          "legendFormat": "{{instance}} \u2192 {{host}}"
+          "legendFormat": "{{instance}} → {{host}}"
         }
       ],
       "fieldConfig": {
@@ -935,7 +1330,10 @@
             "lineWidth": 1,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": false
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
           }
         },
         "overrides": []
@@ -956,10 +1354,10 @@
           "sort": "desc"
         }
       },
-      "id": 14,
+      "id": 19,
       "gridPos": {
         "x": 12,
-        "y": 31,
+        "y": 47,
         "w": 12,
         "h": 8
       },
@@ -971,7 +1369,7 @@
     {
       "type": "heatmap",
       "title": "Round-trip distribution",
-      "description": "Echo round trips per bucket over time, smokeping-style: a wider or higher band means more jitter or latency. Use the host filter to look at one target.",
+      "description": "Echo round trips per bucket over time, smokeping-style: a wider or higher band means more jitter or latency. Use the ICMP target filter to look at one target.",
       "targets": [
         {
           "datasource": {
@@ -1016,10 +1414,10 @@
           "show": true
         }
       },
-      "id": 15,
+      "id": 20,
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 55,
         "w": 12,
         "h": 8
       },
@@ -1040,7 +1438,7 @@
           },
           "expr": "histogram_quantile(0.99, sum by (instance, host, le) (rate(urlchecker_icmp_response_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\", host=~\"$host\"}[$__rate_interval])))",
           "refId": "A",
-          "legendFormat": "{{instance}} \u2192 {{host}}"
+          "legendFormat": "{{instance}} → {{host}}"
         }
       ],
       "fieldConfig": {
@@ -1051,7 +1449,10 @@
             "lineWidth": 1,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": false
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
           }
         },
         "overrides": []
@@ -1072,10 +1473,10 @@
           "sort": "desc"
         }
       },
-      "id": 16,
+      "id": 21,
       "gridPos": {
         "x": 12,
-        "y": 39,
+        "y": 55,
         "w": 12,
         "h": 8
       },
@@ -1086,7 +1487,7 @@
     },
     {
       "type": "table",
-      "title": "Loss matrix (5m): instance \u2193 \u00d7 target \u2192",
+      "title": "Loss matrix (5m): instance ↓ × target →",
       "description": "One cell per pair. With one instance per node (DaemonSet), a bad node shows as a full row and column, and a bad path as a single cell.",
       "targets": [
         {
@@ -1178,12 +1579,333 @@
         "showHeader": true,
         "cellHeight": "sm"
       },
-      "id": 17,
+      "id": 22,
       "gridPos": {
         "x": 0,
-        "y": 47,
+        "y": 63,
         "w": 24,
         "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "row",
+      "id": 23,
+      "title": "Exporter",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 71,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Last reload",
+      "description": "1 when the config and target files loaded; 0 when the last reload failed and the previous targets are still checked.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "min(urlchecker_config_last_reload_successful{job=~\"$job\", instance=~\"$instance\"})",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "FAILED"
+                },
+                "1": {
+                  "text": "OK"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "id": 24,
+      "gridPos": {
+        "x": 0,
+        "y": 72,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Last successful reload",
+      "description": "Time since the targets were last loaded.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "time() - max(urlchecker_config_last_reload_success_timestamp_seconds{job=~\"$job\", instance=~\"$instance\"})",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 25,
+      "gridPos": {
+        "x": 6,
+        "y": 72,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Discovered targets",
+      "description": "Targets found by Kubernetes node discovery, summed over instances.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(urlchecker_discovery_targets{job=~\"$job\", instance=~\"$instance\"}) or vector(0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "id": 26,
+      "gridPos": {
+        "x": 12,
+        "y": 72,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Discovery errors (1h)",
+      "description": "Failed node lists in the last hour. urlchecker keeps the last targets when a list fails.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(increase(urlchecker_discovery_errors_total{job=~\"$job\", instance=~\"$instance\"}[1h])) or vector(0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "id": 27,
+      "gridPos": {
+        "x": 18,
+        "y": 72,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Versions",
+      "description": "urlchecker build per instance.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "urlchecker_build_info{job=~\"$job\", instance=~\"$instance\"}",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "Value": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "id": 28,
+      "gridPos": {
+        "x": 0,
+        "y": 76,
+        "w": 24,
+        "h": 5
       },
       "datasource": {
         "type": "prometheus",

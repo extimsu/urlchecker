@@ -1,12 +1,12 @@
 apiVersion: v2
 name: urlchecker
 description: >-
-  Prometheus exporter that checks TCP, UDP and ICMP reachability. Runs as a
-  Deployment for endpoint checks or as a host-network DaemonSet for
-  node-to-node packet loss.
+  Prometheus exporter for TCP, UDP, ICMP, HTTP(S) and DNS checks. Runs as a
+  Deployment for endpoint checks or as a host-network DaemonSet that finds
+  every node and measures node-to-node packet loss.
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+version: 0.3.0
+appVersion: "0.3.0"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/extimsu/urlchecker
 sources:
@@ -18,6 +18,8 @@ keywords:
   - icmp
   - packet-loss
   - blackbox
+  - http
+  - dns
 maintainers:
   - name: Alexander Extim
     email: it@extim.su
@@ -26,7 +28,15 @@ annotations:
   artifacthub.io/license: MIT
   artifacthub.io/changes: |
     - kind: added
-      description: Grafana dashboard, shipped as a sidecar ConfigMap with grafanaDashboard.enabled
+      description: Kubernetes node discovery (discovery.nodes) with the RBAC it needs
+    - kind: added
+      description: PrometheusRule with target-down, packet-loss, certificate-expiry and reload alerts
+    - kind: added
+      description: HTTP(S), DNS and reload panels on the Grafana dashboard
+    - kind: changed
+      description: Image moved to ghcr.io/extimsu/urlchecker; probes use /healthz and /readyz
+    - kind: changed
+      description: Target changes no longer restart the pods; urlchecker reloads them
   artifacthub.io/images: |
     - name: urlchecker
-      image: docker.io/extim/urlchecker:0.2.0
+      image: ghcr.io/extimsu/urlchecker:0.3.0

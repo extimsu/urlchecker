@@ -41,6 +41,11 @@ type Config struct {
 	RetryCount int    `yaml:"retry_count,omitempty" json:"retry_count,omitempty"` // Number of retry attempts (default: 3)
 	RetryDelay string `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"` // Initial delay between retries (default: "1s")
 
+	// Kubernetes node discovery (exporter mode, in a pod).
+	DiscoverNodes       string `yaml:"discover_nodes,omitempty" json:"discover_nodes,omitempty"`               // "icmp", "tcp:<port>" or both, comma-separated
+	DiscoverExcludeSelf bool   `yaml:"discover_exclude_self,omitempty" json:"discover_exclude_self,omitempty"` // skip the node in NODE_NAME
+	DiscoveryInterval   string `yaml:"discovery_interval,omitempty" json:"discovery_interval,omitempty"`       // how often to list the nodes (default: "30s")
+
 	// Logging
 	LogLevel  string `yaml:"log_level,omitempty" json:"log_level,omitempty"`   // debug, info, warn or error (default: "info")
 	LogFormat string `yaml:"log_format,omitempty" json:"log_format,omitempty"` // text or json (default: "text")
@@ -175,6 +180,15 @@ func (c *Config) Merge(override *Config) {
 		c.RetryDelay = override.RetryDelay
 	}
 
+	if override.DiscoverNodes != "" {
+		c.DiscoverNodes = override.DiscoverNodes
+	}
+	if override.DiscoverExcludeSelf {
+		c.DiscoverExcludeSelf = true
+	}
+	if override.DiscoveryInterval != "" {
+		c.DiscoveryInterval = override.DiscoveryInterval
+	}
 	if override.LogLevel != "" {
 		c.LogLevel = override.LogLevel
 	}
