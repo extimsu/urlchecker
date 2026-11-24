@@ -6,6 +6,7 @@ templates:
   - templates/service.yaml
   - templates/servicemonitor.yaml
   - templates/poddisruptionbudget.yaml
+  - templates/grafana-dashboard.yaml
 release:
   name: probe
   namespace: monitoring
@@ -140,3 +141,22 @@ tests:
       icmp.rawSocket: true
     asserts:
       - hasDocuments: { count: 0 }
+
+  - it: ships no dashboard by default
+    template: templates/grafana-dashboard.yaml
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: ships the dashboard as a sidecar ConfigMap
+    template: templates/grafana-dashboard.yaml
+    set:
+      grafanaDashboard.enabled: true
+      grafanaDashboard.namespace: grafana
+      grafanaDashboard.annotations: { grafana_folder: Monitoring }
+    asserts:
+      - isKind: { of: ConfigMap }
+      - equal: { path: metadata.name, value: probe-urlchecker-dashboard }
+      - equal: { path: metadata.namespace, value: grafana }
+      - equal: { path: metadata.labels.grafana_dashboard, value: "1" }
+      - equal: { path: metadata.annotations.grafana_folder, value: Monitoring }
+      - matchRegex: { path: 'data["urlchecker.json"]', pattern: '"uid": "urlchecker"' }

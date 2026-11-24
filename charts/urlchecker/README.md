@@ -1,6 +1,6 @@
 # urlchecker
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
 
 Prometheus exporter that checks TCP, UDP and ICMP reachability. Runs as a Deployment for endpoint checks or as a host-network DaemonSet for node-to-node packet loss.
 
@@ -14,7 +14,7 @@ target syntax and every metric.
 
 ```console
 helm install probe oci://ghcr.io/extimsu/charts/urlchecker \
-  --version 0.1.0 \
+  --version 0.2.0 \
   --namespace monitoring --create-namespace \
   --set 'targets={example.com:443,icmp://1.1.1.1}'
 ```
@@ -94,6 +94,31 @@ To alert per bad node rather than per pair, count how many of a node's peers
 see loss, and fire when it is half or more. A single bad path then doesn't
 page, and a bad node does.
 
+## Grafana dashboard
+
+```yaml
+grafanaDashboard:
+  enabled: true
+  annotations:
+    grafana_folder: Monitoring   # with the sidecar's folderAnnotation set
+```
+
+This ships [`dashboards/urlchecker.json`](dashboards/urlchecker.json) as a
+ConfigMap labelled `grafana_dashboard: "1"`. The Grafana sidecar of the grafana
+and kube-prometheus-stack charts loads ConfigMaps with that label. If the
+sidecar watches only its own namespace, set `grafanaDashboard.namespace` to that
+namespace. Without the sidecar, import the JSON file in Grafana under
+**Dashboards → New → Import**.
+
+The dashboard shows:
+
+- target status and p95 response time;
+- ICMP loss and round trip;
+- a smokeping-style round-trip heatmap;
+- a loss matrix of instance × target.
+
+In DaemonSet mode, each instance is one node.
+
 ## Targets from your own ConfigMap
 
 ```yaml
@@ -142,6 +167,10 @@ Kubernetes: `>=1.25.0-0`
 | extraVolumeMounts | list | `[]` | Extra volume mounts for the container. |
 | extraVolumes | list | `[]` | Extra volumes for the pod. |
 | fullnameOverride | string | `""` | Override the full resource name. |
+| grafanaDashboard.annotations | object | `{}` | Annotations, e.g. `grafana_folder: Monitoring` with the sidecar's `folderAnnotation` set. |
+| grafanaDashboard.enabled | bool | `false` | Ship the Grafana dashboard (`dashboards/urlchecker.json`) as a ConfigMap for the Grafana sidecar (grafana and kube-prometheus-stack charts) to load. |
+| grafanaDashboard.labels | object | `{"grafana_dashboard":"1"}` | Labels the sidecar selects on. The grafana chart's default is `grafana_dashboard: "1"`. |
+| grafanaDashboard.namespace | string | `""` | Namespace for the ConfigMap. Defaults to the release namespace; set it if the sidecar watches only its own namespace. |
 | hostNetwork | bool | `false` | Use the node's network namespace. Set it for node-to-node probes with `workload.kind: DaemonSet`. Choose a free `metrics.port` on the nodes. |
 | icmp.rawSocket | bool | `false` | Open raw ICMP sockets: runs the container as UID 0 with only the `NET_RAW` capability. Needed with `hostNetwork: true` when the nodes' `net.ipv4.ping_group_range` does not include the pod's group. When false, the pod gets the `net.ipv4.ping_group_range` sysctl so the non-root user can use the unprivileged ping socket (pod network only). |
 | image.digest | string | `""` | Image digest (`sha256:...`). When set it wins over `tag`. |
