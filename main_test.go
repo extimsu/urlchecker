@@ -179,3 +179,11 @@ func TestRunConfigFileNotOverriddenByDefaults(t *testing.T) {
 		t.Fatalf("--port on the command line did not override the file: exit %d", got)
 	}
 }
+
+func TestSplitList(t *testing.T) {
+	got := splitList(` a:1, ,icmp://h {x="1", y="a,b"} ,https://e/ body="a, b"`)
+	want := []string{"a:1", `icmp://h {x="1", y="a,b"}`, `https://e/ body="a, b"`}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("splitList = %q, want %q", got, want)
+	}
+}

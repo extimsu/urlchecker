@@ -157,3 +157,16 @@ func ResetMetrics() {
 		v.Reset()
 	}
 }
+
+var (
+	// ReloadSuccess is 1 when the last target reload worked.
+	ReloadSuccess = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "urlchecker_config_last_reload_successful",
+		Help: "Whether the last reload of the config and target files succeeded (1) or failed (0)",
+	})
+	// ReloadSuccessTime is when the targets were last loaded successfully.
+	ReloadSuccessTime = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "urlchecker_config_last_reload_success_timestamp_seconds",
+		Help: "Unix time of the last successful load of the config and target files",
+	})
+)

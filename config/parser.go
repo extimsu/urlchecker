@@ -118,6 +118,8 @@ func validateConfig(config *Config) error {
 		"retry_delay":        config.RetryDelay,
 		"check_interval":     config.CheckInterval,
 		"ping_interval":      config.PingInterval,
+		"reload_interval":    config.ReloadInterval,
+		"resolve_interval":   config.ResolveInterval,
 	} {
 		if v == "" {
 			continue

@@ -3,6 +3,7 @@ package target
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParse(t *testing.T) {
@@ -27,7 +28,7 @@ func TestParse(t *testing.T) {
 			t.Errorf("Parse(%q): %v", c.in, err)
 			continue
 		}
-		if got != c.want || got.Addr() != c.addr {
+		if !got.Equal(c.want) || got.Addr() != c.addr {
 			t.Errorf("Parse(%q) = %+v (addr %q), want %+v (addr %q)", c.in, got, got.Addr(), c.want, c.addr)
 		}
 	}
@@ -79,5 +80,70 @@ db1:5432
 
 	if _, err := Read(strings.NewReader("ok:1\nftp://x\n"), "list.txt", "tcp", "80", ""); err == nil || !strings.Contains(err.Error(), "list.txt:2:") {
 		t.Errorf("error = %v, want one naming list.txt:2", err)
+	}
+}
+
+func TestParseOptionsAndLabels(t *testing.T) {
+	got, err := Parse(`icmp://10.0.0.1  size=1472 df=true ip=4 timeout=2s {node="worker-1", zone = "fsn1-dc14", note="a \"b\""}`, "tcp", "80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Target{
+		Protocol: "icmp", Host: "10.0.0.1", Size: 1472, DF: true, IPVersion: "4", Timeout: 2 * time.Second,
+		Labels: map[string]string{"node": "worker-1", "zone": "fsn1-dc14", "note": `a "b"`},
+	}
+	if !got.Equal(want) {
+		t.Errorf("got %+v\nwant %+v", got, want)
+	}
+	if got.Network() != "ip4" || got.MetricName() != "10.0.0.1" {
+		t.Errorf("Network %q MetricName %q", got.Network(), got.MetricName())
+	}
+	tcp, _ := Parse("example.com:443 ip=6", "tcp", "80")
+	if tcp.Network() != "tcp6" || tcp.MetricName() != "example.com:443" {
+		t.Errorf("tcp ip=6: Network %q MetricName %q", tcp.Network(), tcp.MetricName())
+	}
+}
+
+func TestParseOptionErrors(t *testing.T) {
+	for _, in := range []string{
+		"example.com:443 size=100",    // size is ICMP only
+		"icmp://h size=big",           // not a number
+		"icmp://h size=70000",         // too big
+		"icmp://h df=maybe",           // not a bool
+		"icmp://h ip=5",               // not 4 or 6
+		"icmp://h timeout=-1s",        // not positive
+		"icmp://h nope=1",             // unknown
+		"icmp://h size=1 size=2",      // twice
+		"icmp://h size",               // no value
+		`icmp://h {node=worker}`,      // unquoted label value
+		`icmp://h {target="x"}`,       // reserved label
+		`icmp://h {__name__="x"}`,     // reserved prefix
+		`icmp://h {a="1" b="2"}`,      // missing comma
+		`icmp://h {a="1", a="2"}`,     // duplicate label
+		`icmp://h {a="1`,              // unterminated
+		`icmp://h }`,                  // unbalanced
+		`icmp://h body="unterminated`, // unterminated option quote
+	} {
+		if got, err := Parse(in, "tcp", "80"); err == nil {
+			t.Errorf("Parse(%q) = %+v, want an error", in, got)
+		}
+	}
+}
+
+func TestEqualAndUnique(t *testing.T) {
+	a, _ := Parse(`icmp://h {n="1"}`, "tcp", "80")
+	b, _ := Parse(`icmp://h {n="2"}`, "tcp", "80")
+	if a.Equal(b) {
+		t.Error("targets with different labels are Equal")
+	}
+	c, _ := Parse(`icmp://h {n="1"}`, "tcp", "80")
+	if !a.Equal(c) {
+		t.Error("identical targets are not Equal")
+	}
+	if err := Unique([]Target{a, b}); err == nil || !strings.Contains(err.Error(), "icmp://h") {
+		t.Errorf("Unique = %v, want an error naming icmp://h", err)
+	}
+	if err := Unique([]Target{a}); err != nil {
+		t.Errorf("Unique of one target: %v", err)
 	}
 }

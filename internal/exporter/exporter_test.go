@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -123,7 +124,7 @@ func replies(t *testing.T, host, ip string) uint64 {
 }
 
 func TestExporterCountsICMPLoss(t *testing.T) {
-	if p, err := probe.NewPinger("127.0.0.1"); err != nil {
+	if p, err := probe.NewPinger(net.ParseIP("127.0.0.1"), probe.PingOptions{}); err != nil {
 		t.Skipf("no ICMP socket here: %v", err)
 	} else {
 		_ = p.Close()
@@ -149,7 +150,7 @@ func TestExporterCountsICMPLoss(t *testing.T) {
 }
 
 func TestExporterSilentTargetShowsLoss(t *testing.T) {
-	if p, err := probe.NewPinger("127.0.0.1"); err != nil {
+	if p, err := probe.NewPinger(net.ParseIP("127.0.0.1"), probe.PingOptions{}); err != nil {
 		t.Skipf("no ICMP socket here: %v", err)
 	} else {
 		_ = p.Close()
@@ -164,4 +165,42 @@ func TestExporterSilentTargetShowsLoss(t *testing.T) {
 	if got := replies(t, "192.0.2.1", "192.0.2.1"); got != 0 {
 		t.Errorf("%d replies from TEST-NET-1, want 0", got)
 	}
+}
+
+func TestExporterTargetInfo(t *testing.T) {
+	a, _ := target.Parse(`icmp://192.0.2.7 {node="w1"}`, "tcp", "80")
+	b, _ := target.Parse(`10.0.0.1:22 {team="db", tier="1"}`, "tcp", "80")
+	e := New(Options{Workers: 1, CheckInterval: time.Hour, PingInterval: time.Hour, Timeout: time.Second, Logger: quiet()})
+	e.SetTargets([]target.Target{a, b})
+	want := `
+# HELP urlchecker_target_info Target labels from the target list, always 1. Join on target (= url or host) to add them to other series.
+# TYPE urlchecker_target_info gauge
+urlchecker_target_info{node="w1",protocol="icmp",target="192.0.2.7"} 1
+urlchecker_target_info{protocol="tcp",target="10.0.0.1:22",team="db",tier="1"} 1
+`
+	if err := testutil.GatherAndCompare(prometheus.DefaultGatherer, strings.NewReader(want), "urlchecker_target_info"); err != nil {
+		t.Error(err)
+	}
+	// A label change restarts the entry and updates the info metric.
+	a2, _ := target.Parse(`icmp://192.0.2.7 {node="w2"}`, "tcp", "80")
+	e.SetTargets([]target.Target{a2})
+	want = `
+# HELP urlchecker_target_info Target labels from the target list, always 1. Join on target (= url or host) to add them to other series.
+# TYPE urlchecker_target_info gauge
+urlchecker_target_info{node="w2",protocol="icmp",target="192.0.2.7"} 1
+`
+	if err := testutil.GatherAndCompare(prometheus.DefaultGatherer, strings.NewReader(want), "urlchecker_target_info"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestExporterChecksAddedTargetNow(t *testing.T) {
+	metrics.ResetMetrics()
+	e := start(t, Options{Workers: 1, CheckInterval: time.Hour, PingInterval: time.Hour, Timeout: time.Second}, nil)
+	eventually(t, "ready", e.Ready)
+	tg := tcp(t, "127.0.0.1:1", "")
+	e.SetTargets([]target.Target{tg})
+	eventually(t, "the added target checked without waiting an hour", func() bool {
+		return testutil.CollectAndCount(metrics.CurrentStatusGauge) == 1
+	})
 }
