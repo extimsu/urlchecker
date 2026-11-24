@@ -263,25 +263,25 @@ func TestLoadConfigJSON(t *testing.T) {
 func TestSaveConfig(t *testing.T) {
 	// Create a test configuration
 	config := &Config{
-		URLs:                  []string{"example.com", "test.com"},
-		Port:                  "443",
-		Protocol:              "tcp",
-		Timeout:               "10s",
-		Metrics:               true,
-		MetricsPort:           9091,
-		Exporter:              true,
-		Workers:               10,
-		WarningThreshold:      "200ms",
-		CriticalThreshold:     "500ms",
-		RetryCount:            5,
-		RetryDelay:            "2s",
+		URLs:                    []string{"example.com", "test.com"},
+		Port:                    "443",
+		Protocol:                "tcp",
+		Timeout:                 "10s",
+		Metrics:                 true,
+		MetricsPort:             9091,
+		Exporter:                true,
+		Workers:                 10,
+		WarningThreshold:        "200ms",
+		CriticalThreshold:       "500ms",
+		RetryCount:              5,
+		RetryDelay:              "2s",
 		CircuitBreakerThreshold: 3,
-		CircuitBreakerTimeout: "30s",
+		CircuitBreakerTimeout:   "30s",
 		Groups: map[string]GroupConfig{
 			"web": {
-				URLs:              []string{"web1.com", "web2.com"},
-				WarningThreshold:  "100ms",
-				RetryCount:        3,
+				URLs:             []string{"web1.com", "web2.com"},
+				WarningThreshold: "100ms",
+				RetryCount:       3,
 			},
 		},
 	}
@@ -374,15 +374,15 @@ func TestDetectFormat(t *testing.T) {
 func TestValidateConfig(t *testing.T) {
 	// Test valid configuration
 	validConfig := &Config{
-		Timeout:               "5s",
-		WarningThreshold:      "500ms",
-		CriticalThreshold:     "1s",
-		RetryDelay:            "1s",
-		CircuitBreakerTimeout: "60s",
-		CheckInterval:         "30s",
-		MetricsPort:           9090,
-		Workers:               5,
-		RetryCount:            3,
+		Timeout:                 "5s",
+		WarningThreshold:        "500ms",
+		CriticalThreshold:       "1s",
+		RetryDelay:              "1s",
+		CircuitBreakerTimeout:   "60s",
+		CheckInterval:           "30s",
+		MetricsPort:             9090,
+		Workers:                 5,
+		RetryCount:              3,
 		CircuitBreakerThreshold: 5,
 	}
 

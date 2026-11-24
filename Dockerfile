@@ -1,46 +1,25 @@
-# Build Stage
-FROM golang:1.24 AS build-stage
+# syntax=docker/dockerfile:1
+# Local and CI image build. Releases use Dockerfile.release with the binaries
+# GoReleaser already built.
+FROM --platform=$BUILDPLATFORM golang:1.27@sha256:205c7636d74e0ffbe3d007162df7d74f859f5a8c8322dfb9f907977686c126cf AS build
+ARG TARGETOS TARGETARCH TARGETVARIANT
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
+    go build -trimpath -ldflags "-s -w \
+      -X github.com/extimsu/urlchecker/version.Version=${VERSION} \
+      -X github.com/extimsu/urlchecker/version.GitCommit=${COMMIT} \
+      -X github.com/extimsu/urlchecker/version.BuildDate=${DATE}" \
+    -o /out/urlchecker .
 
-# Multi-platform build arguments
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETOS
-ARG TARGETARCH
-
-LABEL app="build-urlchecker"
-LABEL REPO="https://github.com/extimsu/urlchecker"
-
-ENV PROJPATH=/go/src/github.com/extimsu/urlchecker
-
-# Because of https://github.com/docker/docker/issues/14914
-ENV PATH=$PATH:$GOROOT/bin:$GOPATH/bin
-
-# Set Go environment variables for cross-compilation
-ENV GOOS=${TARGETOS:-linux}
-ENV GOARCH=${TARGETARCH:-amd64}
-ENV CGO_ENABLED=0
-
-ADD . ${PROJPATH}
-WORKDIR ${PROJPATH}
-
-RUN make build-alpine
-
-# Final Stage
-FROM gcr.io/distroless/base-debian11
-
-ARG GIT_COMMIT
-ARG VERSION
-LABEL REPO="https://github.com/extimsu/urlchecker"
-LABEL GIT_COMMIT=$GIT_COMMIT
-LABEL VERSION=$VERSION
-
-# Because of https://github.com/docker/docker/issues/14914
-ENV PATH=$PATH:/opt/urlchecker/bin
-
-WORKDIR /opt/urlchecker/bin
-
-COPY --from=build-stage /go/src/github.com/extimsu/urlchecker/bin/urlchecker /opt/urlchecker/bin/
-
-USER nonroot:nonroot
-
-ENTRYPOINT ["/opt/urlchecker/bin/urlchecker"]
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+COPY --from=build /out/urlchecker /usr/local/bin/urlchecker
+USER 65532:65532
+EXPOSE 9090
+ENTRYPOINT ["/usr/local/bin/urlchecker"]

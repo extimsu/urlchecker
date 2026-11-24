@@ -1,3 +1,5 @@
+// Package version holds build information. Release builds set the variables
+// with -ldflags "-X github.com/extimsu/urlchecker/version.Version=...".
 package version
 
 import (
@@ -5,28 +7,20 @@ import (
 	"runtime"
 )
 
-// GitCommit returns the git commit that was compiled. This will be filled in by the compiler.
-var GitCommit string
+var (
+	// Version is the release version, without the leading "v".
+	Version = "dev"
+	// GitCommit is the commit the binary was built from.
+	GitCommit = "unknown"
+	// BuildDate is the build time in RFC 3339.
+	BuildDate = "unknown"
+)
 
-// Version returns the main version number that is being run at the moment.
-const Version = "0.2.0"
-
-// BuildDate returns the date the binary was built
-var BuildDate = ""
-
-// GoVersion returns the version of the go runtime used to compile the binary
-var GoVersion = runtime.Version()
-
-// OsArch returns the os and arch used to build the binary
-var OsArch = fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
-
-var Author = fmt.Sprint("Alexander Baulin, 2025 (c) https://extim.su")
-
+// App prints the build information.
 func App() {
-	fmt.Println("Build Date:", BuildDate)
-	fmt.Println("Git Commit:", GitCommit)
 	fmt.Println("Version:", Version)
-	fmt.Println("Go Version:", GoVersion)
-	fmt.Println("OS / Arch:", OsArch)
-	fmt.Println("Author:", Author)
+	fmt.Println("Git Commit:", GitCommit)
+	fmt.Println("Build Date:", BuildDate)
+	fmt.Println("Go Version:", runtime.Version())
+	fmt.Printf("OS / Arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 }

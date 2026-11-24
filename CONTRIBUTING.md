@@ -60,8 +60,11 @@ Ready to contribute? Here's how to set up `urlchecker` for local development.
 
 4. When you're done making changes, check that your changes pass the tests::
 ```bash
-    $ make test
+    $ make test   # go test -race
+    $ make lint   # golangci-lint, the same version CI uses
 ```
+5. Optional: build every release artifact locally with `make snapshot` (needs
+   GoReleaser and Docker).
 6. Commit your changes and push your branch to GitHub::
 ```bash
     $ git add .
@@ -79,3 +82,15 @@ Before you submit a pull request, check that it meets these guidelines:
 2. If the pull request adds functionality, the docs should be updated. Put
    your new functionality into a function with a docstring, and add the
    feature to the list in README.md.
+
+Releasing
+---------
+
+Maintainers release by pushing a tag. CI does the rest:
+
+* `vX.Y.Z` runs `.github/workflows/release.yaml`. GoReleaser builds the
+  binaries, archives, checksums and SBOMs, and the multi-arch images
+  `ghcr.io/extimsu/urlchecker:X.Y.Z` (also `docker.io/extim/urlchecker` when the
+  `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets are set). It signs the
+  images and the checksum file with cosign keyless and publishes a GitHub release.
+* `chart-vX.Y.Z` publishes the Helm chart; see `.github/workflows/chart.yaml`.
