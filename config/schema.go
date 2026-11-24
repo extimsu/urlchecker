@@ -36,16 +36,22 @@ type Config struct {
 	RetryCount int    `yaml:"retry_count,omitempty" json:"retry_count,omitempty"` // Number of retry attempts (default: 3)
 	RetryDelay string `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"` // Initial delay between retries (default: "1s")
 
-	// Circuit breaker configuration
-	CircuitBreakerThreshold int    `yaml:"circuit_breaker_threshold,omitempty" json:"circuit_breaker_threshold,omitempty"` // Failure threshold (default: 5)
-	CircuitBreakerTimeout   string `yaml:"circuit_breaker_timeout,omitempty" json:"circuit_breaker_timeout,omitempty"`     // Timeout before recovery (default: "60s")
+	// Logging
+	LogLevel  string `yaml:"log_level,omitempty" json:"log_level,omitempty"`   // debug, info, warn or error (default: "info")
+	LogFormat string `yaml:"log_format,omitempty" json:"log_format,omitempty"` // text or json (default: "text")
+
+	// Deprecated: the circuit breaker was removed in 0.3.0. The keys still
+	// parse, and urlchecker warns when they are set.
+	CircuitBreakerThreshold int    `yaml:"circuit_breaker_threshold,omitempty" json:"circuit_breaker_threshold,omitempty"`
+	CircuitBreakerTimeout   string `yaml:"circuit_breaker_timeout,omitempty" json:"circuit_breaker_timeout,omitempty"`
 }
 
 // GroupConfig represents configuration for a specific group
 type GroupConfig struct {
 	URLs []string `yaml:"urls,omitempty" json:"urls,omitempty"` // URLs in this group
 
-	// Per-group overrides
+	// Deprecated: per-group overrides were never applied and are ignored.
+	// The keys still parse, and urlchecker warns when they are set.
 	WarningThreshold        string `yaml:"warning_threshold,omitempty" json:"warning_threshold,omitempty"`                 // Group-specific warning threshold
 	CriticalThreshold       string `yaml:"critical_threshold,omitempty" json:"critical_threshold,omitempty"`               // Group-specific critical threshold
 	RetryCount              int    `yaml:"retry_count,omitempty" json:"retry_count,omitempty"`                             // Group-specific retry count
@@ -57,23 +63,23 @@ type GroupConfig struct {
 // DefaultConfig returns a configuration with sensible defaults matching CLI behavior
 func DefaultConfig() *Config {
 	return &Config{
-		Port:                    "80",
-		Protocol:                "tcp",
-		Timeout:                 "5s",
-		JSONOutput:              false,
-		Metrics:                 false,
-		MetricsPort:             9090,
-		Exporter:                false,
-		CheckInterval:           "30s",
-		Workers:                 5,
-		PingInterval:            "1s",
-		WarningThreshold:        "500ms",
-		CriticalThreshold:       "1s",
-		RetryCount:              3,
-		RetryDelay:              "1s",
-		CircuitBreakerThreshold: 5,
-		CircuitBreakerTimeout:   "60s",
-		Groups:                  make(map[string]GroupConfig),
+		Port:              "80",
+		Protocol:          "tcp",
+		Timeout:           "5s",
+		JSONOutput:        false,
+		Metrics:           false,
+		MetricsPort:       9090,
+		Exporter:          false,
+		CheckInterval:     "30s",
+		Workers:           5,
+		PingInterval:      "1s",
+		WarningThreshold:  "500ms",
+		CriticalThreshold: "1s",
+		RetryCount:        3,
+		RetryDelay:        "1s",
+		LogLevel:          "info",
+		LogFormat:         "text",
+		Groups:            make(map[string]GroupConfig),
 	}
 }
 
@@ -156,6 +162,13 @@ func (c *Config) Merge(override *Config) {
 		c.RetryDelay = override.RetryDelay
 	}
 
+	if override.LogLevel != "" {
+		c.LogLevel = override.LogLevel
+	}
+	if override.LogFormat != "" {
+		c.LogFormat = override.LogFormat
+	}
+
 	// Merge circuit breaker configuration
 	if override.CircuitBreakerThreshold != 0 {
 		c.CircuitBreakerThreshold = override.CircuitBreakerThreshold
@@ -165,40 +178,21 @@ func (c *Config) Merge(override *Config) {
 	}
 }
 
-// GetGroupConfig returns the configuration for a specific group, with defaults from the main config
-func (c *Config) GetGroupConfig(groupName string) *GroupConfig {
-	group, exists := c.Groups[groupName]
-	if !exists {
-		// Return a default group config with main config values
-		return &GroupConfig{
-			WarningThreshold:        c.WarningThreshold,
-			CriticalThreshold:       c.CriticalThreshold,
-			RetryCount:              c.RetryCount,
-			RetryDelay:              c.RetryDelay,
-			CircuitBreakerThreshold: c.CircuitBreakerThreshold,
-			CircuitBreakerTimeout:   c.CircuitBreakerTimeout,
+// DeprecatedKeys lists the deprecated keys that are set, so the caller can
+// warn about them.
+func (c *Config) DeprecatedKeys() []string {
+	var keys []string
+	if c.CircuitBreakerThreshold != 0 {
+		keys = append(keys, "circuit_breaker_threshold")
+	}
+	if c.CircuitBreakerTimeout != "" {
+		keys = append(keys, "circuit_breaker_timeout")
+	}
+	for name, g := range c.Groups {
+		if g.WarningThreshold != "" || g.CriticalThreshold != "" || g.RetryCount != 0 || g.RetryDelay != "" ||
+			g.CircuitBreakerThreshold != 0 || g.CircuitBreakerTimeout != "" {
+			keys = append(keys, "groups."+name+" overrides")
 		}
 	}
-
-	// Merge with main config defaults for any unset values
-	if group.WarningThreshold == "" {
-		group.WarningThreshold = c.WarningThreshold
-	}
-	if group.CriticalThreshold == "" {
-		group.CriticalThreshold = c.CriticalThreshold
-	}
-	if group.RetryCount == 0 {
-		group.RetryCount = c.RetryCount
-	}
-	if group.RetryDelay == "" {
-		group.RetryDelay = c.RetryDelay
-	}
-	if group.CircuitBreakerThreshold == 0 {
-		group.CircuitBreakerThreshold = c.CircuitBreakerThreshold
-	}
-	if group.CircuitBreakerTimeout == "" {
-		group.CircuitBreakerTimeout = c.CircuitBreakerTimeout
-	}
-
-	return &group
+	return keys
 }

@@ -1,66 +1,47 @@
-# Example YAML configuration file for urlchecker
-# This file demonstrates all available configuration options
+# Example urlchecker configuration (YAML; JSON works too).
+# Every key is optional. Flags given on the command line override these values.
 
-# Basic URL configuration
+# Targets: "host", "host:port", "tcp://host:port", "udp://host:port" or "icmp://host".
 urls:
-  - "example.com"
-  - "google.com"
-  - "github.com"
+  - "example.com:443"
+  - "icmp://1.1.1.1"
 
-# Alternative: specify a file containing URLs
-# file: "urls.txt"
+# Alternatively, or as well: a file with one target per line.
+# file: "targets.txt"
 
-# Connection settings
+# Defaults for targets without a protocol prefix or a port.
 port: "80"
 protocol: "tcp"
 timeout: "5s"
 
-# Output configuration
+# One-shot output.
 json_output: false
-
-# Metrics and monitoring
-metrics: true
-metrics_port: 9090
-
-# Exporter mode configuration
-exporter: true
-check_interval: "30s"
-workers: 5
-ping_interval: "1s" # for icmp:// targets
-
-# Group configuration
-group_name: "default"
-groups:
-  web:
-    urls:
-      - "web1.example.com"
-      - "web2.example.com"
-    warning_threshold: "200ms"
-    critical_threshold: "500ms"
-    retry_count: 3
-    retry_delay: "1s"
-    circuit_breaker_threshold: 3
-    circuit_breaker_timeout: "30s"
-  
-  api:
-    urls:
-      - "api1.example.com"
-      - "api2.example.com"
-    warning_threshold: "100ms"
-    critical_threshold: "300ms"
-    retry_count: 5
-    retry_delay: "500ms"
-    circuit_breaker_threshold: 2
-    circuit_breaker_timeout: "60s"
-
-# Response time thresholds
 warning_threshold: "500ms"
 critical_threshold: "1s"
 
-# Retry configuration
+# Retries after a failed check (one-shot and metrics modes; the exporter never retries).
 retry_count: 3
 retry_delay: "1s"
 
-# Circuit breaker configuration
-circuit_breaker_threshold: 5
-circuit_breaker_timeout: "60s"
+# Run mode: metrics (repeat the one-shot check) or exporter (Prometheus exporter).
+metrics: false
+exporter: true
+metrics_port: 9090
+check_interval: "30s" # TCP and UDP targets
+workers: 5
+ping_interval: "1s" # icmp:// targets, exporter mode
+
+# Groups: a group is healthy when all of its targets are up (urlchecker_group_health).
+group_name: "" # put every target above in this group
+groups:
+  web:
+    urls:
+      - "web1.example.com:443"
+      - "web2.example.com:443"
+  dns:
+    urls:
+      - "udp://10.0.0.53:53"
+
+# Logging to stderr.
+log_level: "info" # debug, info, warn or error
+log_format: "text" # text or json

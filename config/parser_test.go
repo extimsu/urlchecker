@@ -41,13 +41,13 @@ groups:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	_, err = tmpFile.WriteString(yamlContent)
 	if err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Load the configuration
 	config, err := LoadConfig(tmpFile.Name())
@@ -169,13 +169,13 @@ func TestLoadConfigJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	_, err = tmpFile.WriteString(jsonContent)
 	if err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Load the configuration
 	config, err := LoadConfig(tmpFile.Name())
@@ -288,7 +288,7 @@ func TestSaveConfig(t *testing.T) {
 
 	// Test saving as YAML
 	yamlFile := "test-config.yaml"
-	defer os.Remove(yamlFile)
+	defer func() { _ = os.Remove(yamlFile) }()
 
 	err := SaveConfig(config, yamlFile)
 	if err != nil {
@@ -314,7 +314,7 @@ func TestSaveConfig(t *testing.T) {
 
 	// Test saving as JSON
 	jsonFile := "test-config.json"
-	defer os.Remove(jsonFile)
+	defer func() { _ = os.Remove(jsonFile) }()
 
 	err = SaveConfig(config, jsonFile)
 	if err != nil {
@@ -374,16 +374,14 @@ func TestDetectFormat(t *testing.T) {
 func TestValidateConfig(t *testing.T) {
 	// Test valid configuration
 	validConfig := &Config{
-		Timeout:                 "5s",
-		WarningThreshold:        "500ms",
-		CriticalThreshold:       "1s",
-		RetryDelay:              "1s",
-		CircuitBreakerTimeout:   "60s",
-		CheckInterval:           "30s",
-		MetricsPort:             9090,
-		Workers:                 5,
-		RetryCount:              3,
-		CircuitBreakerThreshold: 5,
+		Timeout:           "5s",
+		WarningThreshold:  "500ms",
+		CriticalThreshold: "1s",
+		RetryDelay:        "1s",
+		CheckInterval:     "30s",
+		MetricsPort:       9090,
+		Workers:           5,
+		RetryCount:        3,
 	}
 
 	err := validateConfig(validConfig)
@@ -429,15 +427,5 @@ func TestValidateConfig(t *testing.T) {
 	err = validateConfig(invalidConfig)
 	if err == nil {
 		t.Error("Expected invalid retry count to fail validation")
-	}
-
-	// Test invalid circuit breaker threshold
-	invalidConfig = &Config{
-		CircuitBreakerThreshold: 0, // Invalid threshold
-	}
-
-	err = validateConfig(invalidConfig)
-	if err == nil {
-		t.Error("Expected invalid circuit breaker threshold to fail validation")
 	}
 }
