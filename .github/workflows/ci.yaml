@@ -26,7 +26,8 @@ jobs:
           go-version: ${{ matrix.go }}
       - run: go mod tidy -diff
       - run: go vet ./...
-      # The ICMP tests use the unprivileged ping socket; GitHub's runners allow it.
+      # Let the ICMP tests use the unprivileged ping socket instead of skipping.
+      - run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
       - run: go test -race -coverprofile=coverage.out ./...
       - run: go tool cover -func=coverage.out | tail -1
 
